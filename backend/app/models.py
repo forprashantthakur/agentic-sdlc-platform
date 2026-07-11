@@ -190,7 +190,9 @@ class Approval(Base):
     artifact_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approver_email: Mapped[str] = mapped_column(String(200))
     status: Mapped[ApprovalStatus] = mapped_column(Enum(ApprovalStatus), default=ApprovalStatus.PENDING)
-    token: Mapped[str] = mapped_column(String(300), index=True)
+    # Signed JWT. Length varies with claims — never cap it. Postgres enforces VARCHAR
+    # limits (SQLite does not), so a String(n) here is a production-only landmine.
+    token: Mapped[str] = mapped_column(Text, index=True)
     email_message_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
