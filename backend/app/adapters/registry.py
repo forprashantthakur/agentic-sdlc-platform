@@ -19,28 +19,28 @@ from app.core.logging import log
 
 @lru_cache
 def figma():
-    if settings.mock_mode or not settings.figma_token:
+    if settings.is_mocked("figma") or not settings.figma_token:
         return MockFigmaAdapter()
     return FigmaMCPAdapter(settings.figma_mcp_url, settings.figma_token)
 
 
 @lru_cache
 def mail():
-    if settings.mock_mode or not settings.google_sa_json:
+    if settings.is_mocked("gmail") or not settings.google_sa_json:
         return MockGmailAdapter()
     return GmailAdapter(settings.google_sa_json, settings.gmail_sender)
 
 
 @lru_cache
 def drive():
-    if settings.mock_mode or not (settings.google_sa_json and settings.gdrive_root_folder_id):
+    if settings.is_mocked("drive") or not (settings.google_sa_json and settings.gdrive_root_folder_id):
         return MockDriveAdapter()
     return DriveAdapter(settings.google_sa_json, settings.gdrive_root_folder_id)
 
 
 @lru_cache
 def tracker():
-    if settings.mock_mode or not (settings.jira_token and settings.jira_base_url):
+    if settings.is_mocked("jira") or not (settings.jira_token and settings.jira_base_url):
         return MockJiraAdapter()
     return JiraAdapter(settings.jira_base_url, settings.jira_email, settings.jira_token)
 

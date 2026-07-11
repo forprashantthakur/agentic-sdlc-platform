@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     mock_mode: bool = True
 
+    # Per-service overrides. None = inherit mock_mode. Set to false to force a single
+    # integration live while everything else stays mocked (e.g. real Figma, mock Gemini).
+    llm_mock: bool | None = None
+    figma_mock: bool | None = None
+    gmail_mock: bool | None = None
+    drive_mock: bool | None = None
+    jira_mock: bool | None = None
+
     database_url: str = "postgresql+psycopg://sdlc:sdlc@localhost:5432/sdlc"
 
     google_api_key: str = ""
@@ -42,6 +50,11 @@ class Settings(BaseSettings):
     # Embedding dimension for text-embedding-004
     embed_dim: int = 768
 
+    def is_mocked(self, service: str) -> bool:
+        """Per-service resolution: explicit override wins, else the global MOCK_MODE."""
+        override = getattr(self, f"{service}_mock", None)
+        return self.mock_mode if override is None else override
+
     @property
     def db_url(self) -> str:
         """Managed Postgres providers (Render, Heroku, Railway) hand out `postgres://…`.
@@ -63,8 +76,8 @@ class Settings(BaseSettings):
 
     @property
     def live_llm(self) -> bool:
-        """True only when we have a real credential path AND mocks are off."""
-        if self.mock_mode:
+        """True only when we have a real credential path AND the LLM is not mocked."""
+        if self.is_mocked("llm"):
             return False
         return bool(self.google_api_key) or (self.use_vertex and bool(self.vertex_project))
 

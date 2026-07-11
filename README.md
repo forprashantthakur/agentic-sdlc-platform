@@ -139,3 +139,44 @@ authentication** (see `docs/ARCHITECTURE.md` §7), so a public URL with a live `
 is an unauthenticated LLM endpoint — a quota drain and a prompt-injection target. The mock
 demo is fully functional: six agents, both approval gates, the revision loop, versioned diffs.
 Add auth before you add a real key.
+
+
+---
+
+## Taking Figma live (Agent 3)
+
+Figma's MCP server gained **write-to-canvas** in Feb 2026. Before that, file content was
+read-only over the REST API and generating wireframes into Figma was impossible without a
+custom plugin. So this is newly possible — and the adapter is built for the fact that the
+server's tool names are version- and plan-dependent.
+
+**It does not guess tool names.** It calls `tools/list`, discovers what the server actually
+offers, and resolves `create_file` / `create_frame` / `export` against that. If a tool is
+missing it says so, loudly, naming what *was* available.
+
+1. **Seat:** write-to-canvas needs a **Full seat on a paid plan**. Dev seats are read-only
+   outside drafts; Starter/View seats get ~6 tool calls a month. Check this before anything else.
+
+2. **Configure:**
+   ```bash
+   FIGMA_MCP_URL=https://mcp.figma.com/mcp   # remote; the local 127.0.0.1:3845 server needs
+                                             # the desktop app on the same machine
+   FIGMA_TOKEN=<your token>
+   FIGMA_MOCK=false                          # live Figma, everything else still mocked
+   ```
+
+3. **Discover the real tool set:**
+   ```bash
+   curl -s https://<your-backend>/api/integrations/figma/tools | python3 -m json.tool
+   ```
+   Returns every advertised tool with its input schema, plus `resolved_operations` (what the
+   adapter mapped) and `missing_operations` (what it could not). If `missing_operations` is
+   empty, Agent 3 will author real frames on the next run.
+
+4. **If an operation is missing**, add the server's actual tool name to `TOOL_CANDIDATES` in
+   `backend/app/adapters/figma_mcp.py`. One line per rename — cheaper than rewriting call sites.
+
+**Worth weighing first:** write-to-canvas is in beta and Figma have signalled it becomes
+usage-based paid afterwards. Agent 3 already produces a structured screen spec, and that spec
+— not the Figma frames — is what Agent 4 consumes downstream. The frames are for humans to look
+at. Decide whether that is worth a paid seat plus per-call billing.
