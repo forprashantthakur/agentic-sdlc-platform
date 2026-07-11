@@ -14,7 +14,7 @@ services:
     plan: free
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
-    region: singapore            # closest Render region to India
+   
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL        # Render injects postgres://… ; config.py normalises the scheme
