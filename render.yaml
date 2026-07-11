@@ -1,0 +1,33 @@
+# Render blueprint — one-click deploy of the backend + Postgres.
+# Render → New → Blueprint → connect this repo. Everything below is provisioned automatically.
+databases:
+  - name: sdlc-db
+    databaseName: sdlc
+    user: sdlc
+    plan: free
+    postgresMajorVersion: "16"   # pgvector ships with Render PG16; the app runs CREATE EXTENSION itself
+
+services:
+  - type: web
+    name: sdlc-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: singapore            # closest Render region to India
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL        # Render injects postgres://… ; config.py normalises the scheme
+        fromDatabase:
+          name: sdlc-db
+          property: connectionString
+      - key: MOCK_MODE
+        value: "true"            # flip to false + add GOOGLE_API_KEY to go live on Gemini
+      - key: APP_ENV
+        value: prod
+      - key: JWT_SECRET
+        generateValue: true      # Render generates a strong secret; never commit one
+      - key: CORS_ORIGINS
+        sync: false              # set to your Vercel URL after the frontend deploys
+      - key: GOOGLE_API_KEY
+        sync: false

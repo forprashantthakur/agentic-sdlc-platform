@@ -90,3 +90,52 @@ frontend/src/  React console: pipeline, live timeline, artifact+version viewer, 
 
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the design decisions and the
 trade-offs behind them.
+
+---
+
+## Deploying it live
+
+Split deployment, because the two halves have different needs: the console is a static
+bundle, the backend is a long-running container with a database.
+
+**Backend → Render** (reads `render.yaml`, provisions Postgres automatically)
+
+1. [render.com](https://render.com) → **New** → **Blueprint** → connect this repo.
+2. Render reads `render.yaml`: builds `backend/Dockerfile`, provisions Postgres 16,
+   wires `DATABASE_URL`, generates `JWT_SECRET`. Deploy.
+3. Copy the service URL, e.g. `https://sdlc-backend.onrender.com`. Check `/health` — it
+   reports which integrations are live vs mocked.
+
+**Frontend → Vercel**
+
+1. [vercel.com/new](https://vercel.com/new) → import this repo. `vercel.json` supplies the
+   build config; leave the framework preset alone.
+2. Add an environment variable: `VITE_API_BASE` = your Render backend URL.
+3. Deploy.
+
+**Then close the CORS loop:** back in Render, set `CORS_ORIGINS` to your Vercel URL
+(e.g. `https://agentic-sdlc-platform.vercel.app`) and redeploy. Until you do, the browser
+will block every API call — `allowed_origins` fails *closed* in prod by design.
+
+### Why not all of it on Vercel?
+
+The backend cannot run serverless, and this is architectural rather than a config gap:
+
+- runs execute on a **background thread** and would be killed the moment the function returns;
+- the **SSE** timeline outlives a serverless invocation's duration cap;
+- **pgvector** needs a real Postgres;
+- and the whole point of the LangGraph Postgres checkpointer is that a run **suspended at an
+  approval gate for days** survives a redeploy. Serverless has nowhere to survive.
+
+Agent 4 alone makes seven Gemini 2.5 Pro calls. That is minutes, not seconds.
+
+Cloud Run is the better long-term home — same GCP project as Vertex, `asia-south1` residency
+intact — and the same `Dockerfile` deploys there unchanged.
+
+### A note on running it publicly
+
+The deployed default is `MOCK_MODE=true`. That is deliberate: the platform has **no
+authentication** (see `docs/ARCHITECTURE.md` §7), so a public URL with a live `GOOGLE_API_KEY`
+is an unauthenticated LLM endpoint — a quota drain and a prompt-injection target. The mock
+demo is fully functional: six agents, both approval gates, the revision loop, versioned diffs.
+Add auth before you add a real key.

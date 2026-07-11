@@ -31,11 +31,11 @@ def checkpointer():
     The Postgres saver is what makes an approval gate survive a backend restart —
     a run interrupted on Friday resumes on Monday from the same checkpoint.
     """
-    if settings.database_url.startswith("postgresql"):
+    if settings.db_url.startswith("postgresql"):
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
 
-            dsn = settings.database_url.replace("postgresql+psycopg", "postgresql")
+            dsn = settings.db_url.replace("postgresql+psycopg", "postgresql")
             with PostgresSaver.from_conn_string(dsn) as cp:
                 cp.setup()
                 yield cp
