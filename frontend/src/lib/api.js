@@ -23,6 +23,9 @@ export const api = {
   history: (id) => req(`/api/runs/${id}/history`),
 
   artifacts: (pid) => req(`/api/artifacts?project_id=${pid}`),
+  exportUrl: (vid, fmt) => `${BASE}/api/artifacts/versions/${vid}/export?format=${fmt}`,
+  packUrl: (pid, fmt, approvedOnly = false) =>
+    `${BASE}/api/artifacts/pack?project_id=${pid}&format=${fmt}&approved_only=${approvedOnly}`,
   version: (vid) => req(`/api/artifacts/versions/${vid}`),
   diff: (vid) => req(`/api/artifacts/versions/${vid}/diff`),
 

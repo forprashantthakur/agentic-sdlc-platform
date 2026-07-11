@@ -180,3 +180,34 @@ missing it says so, loudly, naming what *was* available.
 usage-based paid afterwards. Agent 3 already produces a structured screen spec, and that spec
 — not the Figma frames — is what Agent 4 consumes downstream. The frames are for humans to look
 at. Decide whether that is worth a paid seat plus per-call billing.
+
+
+---
+
+## Exporting documents
+
+Every artifact — Concept Note, BRD, FRD, SRS, Wireframes, User Stories, Acceptance Criteria,
+API Requirements, NFRs, Sprint Plan, Business Requirements — exports to **Word (.docx)**,
+**PDF** and **Markdown**, from the console or the API.
+
+```
+GET /api/artifacts/versions/{version_id}/export?format=docx|pdf|md
+GET /api/artifacts/pack?project_id={id}&format=docx|pdf&approved_only=true
+```
+
+The **pack** is the one that matters in practice: every artifact in one document, ordered as a
+requirements pack reads (Requirements → Concept Note → Wireframes → BRD → FRD → SRS → Stories →
+ACs → APIs → NFRs → Sprint Plan), with a cover page and — on every document — its version,
+producing agent, model and approval status. `approved_only=true` exports only signed-off
+versions, which is the artifact you hand an auditor.
+
+**Why there is only one renderer.** `render.py` turns each structured payload into markdown;
+that markdown is what the reviewer sees on screen and what the diff engine compares. Export
+parses *that same markdown* into a block model and renders it to Word and PDF. Writing a
+separate renderer per format per artifact type would be nine types × three formats of drift
+waiting to happen — the PDF would eventually, quietly, disagree with the screen. One source of
+truth, three outputs.
+
+PDF uses WeasyPrint (real tables, repeating headers across page breaks, page numbers), which
+links against pango/cairo — those system libraries are installed in `backend/Dockerfile`.
+Without them the import succeeds at build time and fails on the first PDF request.

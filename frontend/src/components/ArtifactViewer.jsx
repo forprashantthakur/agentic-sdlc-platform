@@ -44,7 +44,17 @@ export default function ArtifactViewer({ projectId, refreshKey }) {
 
   return (
     <div className="panel">
-      <h2>Artifacts &amp; versions</h2>
+      <h2>
+        Artifacts &amp; versions
+        <span className="exports">
+          <span className="small muted">Export pack:</span>
+          <a className="exp" href={api.packUrl(projectId, 'docx')} target="_blank" rel="noreferrer">Word</a>
+          <a className="exp" href={api.packUrl(projectId, 'pdf')} target="_blank" rel="noreferrer">PDF</a>
+          <a className="exp ok" href={api.packUrl(projectId, 'pdf', true)} target="_blank" rel="noreferrer">
+            PDF (approved only)
+          </a>
+        </span>
+      </h2>
       <div className="tabs">
         {artifacts.map((a) => (
           <button
@@ -79,6 +89,9 @@ export default function ArtifactViewer({ projectId, refreshKey }) {
             {version.external_ref && (
               <a className="small" href={version.external_ref} target="_blank" rel="noreferrer">External ↗</a>
             )}
+            <a className="exp" href={api.exportUrl(version.id, 'docx')} target="_blank" rel="noreferrer">Word</a>
+            <a className="exp" href={api.exportUrl(version.id, 'pdf')} target="_blank" rel="noreferrer">PDF</a>
+            <a className="exp" href={api.exportUrl(version.id, 'md')} target="_blank" rel="noreferrer">MD</a>
             {active.versions.length > 1 && (
               <button className="secondary" onClick={() => setShowDiff((s) => !s)}>
                 {showDiff ? 'View document' : 'View diff'}
