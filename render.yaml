@@ -17,10 +17,8 @@ services:
    
     healthCheckPath: /health
     envVars:
-      - key: DATABASE_URL        # Render injects postgres://… ; config.py normalises the scheme
-        fromDatabase:
-          name: sdlc-db
-          property: connectionString
+- key: DATABASE_URL        # set manually to the DB's EXTERNAL URL — resolves across regions
+        sync: false
       - key: MOCK_MODE
         value: "true"            # flip to false + add GOOGLE_API_KEY to go live on Gemini
       - key: APP_ENV
