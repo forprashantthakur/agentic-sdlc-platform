@@ -295,3 +295,44 @@ It had never executed, and it would have failed:
   where the message can say what actually went wrong.
 
 Token usage (prompt / output / thinking) is logged per call, so cost is attributable per agent.
+
+
+---
+
+## Demo data — five banking IT projects
+
+```
+GET  /api/projects/demo/catalog     # the library
+POST /api/projects/seed?key=<key>   # seed one
+POST /api/projects/seed/all         # seed all five
+```
+
+| Key | Project | Business unit | Regulatory |
+|---|---|---|---|
+| `upi_autopay` | UPI AutoPay Self-Service | Retail — Digital Channels | RBI e-Mandate, Data Localisation |
+| `corporate_fx` | Corporate FX Booking Portal | Wholesale Banking | FEMA |
+| `vkyc_onboarding` | Digital Account Opening & V-KYC Re-platform | Retail — Liabilities | KYC/AML, DPDP Act 2023 |
+| `card_disputes` | Credit Card Dispute & Chargeback Automation | Payments & Cards | RBI TAT, PCI-DSS |
+| `aml_monitoring` | AML Transaction Monitoring Uplift | Risk & Compliance | PMLA |
+
+Each ships with three sources (workshop notes, an email thread, a call transcript), a full intake
+context, and — deliberately — **a real conflict and a real gap**:
+
+- **UPI AutoPay** — the workshop fixes the debit-retry cap at 3; the sponsor's call says
+  merchant-configurable. Nobody says what happens to a mandate on a frozen account.
+- **Corporate FX** — Market Risk wants a USD 1mn dealer-approval threshold; Treasury and the
+  Dealing Desk want USD 2mn tiered by rating. Nobody decides what happens when the rate feed dies.
+- **V-KYC** — Ops wants appointment-based video KYC to smooth spiky capacity; the business head
+  says appointments are just delayed drop-offs. Nobody has designed the journey for customers who
+  *fail* V-CIP, and an accessibility gap for hearing-impaired customers is raised and dropped.
+- **Card Disputes** — Ops wants a flat INR 5,000 auto-approval threshold; Risk calls it an abuse
+  vector. There is no SLA for reviewing merchant representments, and the clawback leakage on failed
+  chargebacks is admitted to be unmeasured.
+- **AML** — Data Science wants to auto-close the lowest-risk decile at 99% precision; the CCO
+  refuses autonomous closure at any threshold. An 11,000-alert backlog has no plan, and training on
+  historical analyst dispositions risks automating their bias.
+
+**This is the point of the corpus.** A seed set where every source agrees would make the agents look
+brilliant and prove nothing. What is worth demonstrating is Agent 1 *escalating* the disagreement
+instead of quietly picking a side — because an agent that silently resolves an ambiguity is a
+liability in a bank, and one that flags it is an analyst.

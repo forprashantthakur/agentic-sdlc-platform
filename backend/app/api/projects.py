@@ -8,7 +8,7 @@ from app.core.db import get_session
 from app.memory import rag
 from app.models import Artifact, Project, Run, RunStatus, Source
 from app.schemas import BusinessContext, ProjectIn, ProjectOut, SourceIn
-from app.seed import SEED_SOURCES
+from app.seed import CATALOG, catalog_summary
 from app.services import ingest
 
 MAX_UPLOAD_MB = 25
@@ -169,17 +169,52 @@ def list_sources(project_id: str, db: Session = Depends(get_session)):
     ]
 
 
-@router.post("/seed", response_model=ProjectOut, status_code=201)
-def seed(db: Session = Depends(get_session)):
-    """One-call demo bootstrap: a real project with meeting notes, an email thread and a transcript."""
+@router.get("/demo/catalog")
+def demo_catalog():
+    """The demo library: five banking IT projects, each with a deliberately flawed evidence base.
+
+    Every one carries a real conflict (two sources that disagree on a material decision) and a real
+    gap (something a bank obviously needs that nobody thought to say). A seed corpus where every
+    source agrees would make the agents look brilliant and prove nothing.
+    """
+    return catalog_summary()
+
+
+def _seed_one(db: Session, key: str) -> Project:
+    spec = CATALOG[key]
     p = Project(
-        name="UPI AutoPay Self-Service",
-        business_unit="Retail Banking — Digital Channels",
-        description="Enable retail customers to create and manage UPI AutoPay mandates in MobileBanking.",
+        name=spec["name"], business_unit=spec["business_unit"],
+        description=spec["description"], context=spec["context"],
     )
     db.add(p)
     db.flush()
-    for s in SEED_SOURCES:
-        db.add(Source(project_id=p.id, kind=s["kind"], title=s["title"], content=s["content"]))
+    for kind, title, content in spec["sources"]:
+        db.add(Source(project_id=p.id, kind=kind, title=title, content=content))
     db.flush()
-    return _out(db, p)
+
+    # Index the intake context as evidence, exactly as a real project would.
+    ctx = spec["context"]
+    rag.index(
+        project_id=p.id,
+        content="\n".join(
+            f"{k.replace('_', ' ').title()}: {v if not isinstance(v, list) else ', '.join(v)}"
+            for k, v in ctx.items() if v
+        ),
+        namespace="source",
+        meta={"kind": "BUSINESS_CONTEXT", "title": "Business Context (intake form)"},
+    )
+    return p
+
+
+@router.post("/seed", response_model=ProjectOut, status_code=201)
+def seed(key: str = "upi_autopay", db: Session = Depends(get_session)):
+    """Seed one demo project. Defaults to UPI AutoPay for backwards compatibility."""
+    if key not in CATALOG:
+        raise HTTPException(404, f"Unknown demo project '{key}'. Options: {', '.join(CATALOG)}")
+    return _out(db, _seed_one(db, key))
+
+
+@router.post("/seed/all", response_model=list[ProjectOut], status_code=201)
+def seed_all(db: Session = Depends(get_session)):
+    """Seed the whole catalogue — five projects across five business units."""
+    return [_out(db, _seed_one(db, key)) for key in CATALOG]

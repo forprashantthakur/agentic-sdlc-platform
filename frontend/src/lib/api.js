@@ -24,7 +24,9 @@ export const api = {
   project: (id) => req(`/api/projects/${id}`),
   createProject: (b) => req('/api/projects', { method: 'POST', body: JSON.stringify(b) }),
   updateContext: (id, ctx) => req(`/api/projects/${id}/context`, { method: 'PATCH', body: JSON.stringify(ctx) }),
-  seedProject: () => req('/api/projects/seed', { method: 'POST' }),
+  demoCatalog: () => req('/api/projects/demo/catalog'),
+  seedProject: (key = 'upi_autopay') => req(`/api/projects/seed?key=${key}`, { method: 'POST' }),
+  seedAll: () => req('/api/projects/seed/all', { method: 'POST' }),
 
   sources: (pid) => req(`/api/projects/${pid}/sources`),
   addSource: (pid, b) => req(`/api/projects/${pid}/sources`, { method: 'POST', body: JSON.stringify(b) }),

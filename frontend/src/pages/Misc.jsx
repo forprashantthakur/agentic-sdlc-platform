@@ -34,7 +34,8 @@ export function Projects({ setProject }) {
       </div>
 
       {filtered.length === 0 ? (
-        <Empty icon={FolderKanban} title="No projects" hint="Start a new BRD from the left nav." />
+        <Empty icon={FolderKanban} title="No projects"
+          hint="Start a new BRD from the left nav, or load the demo library from the Dashboard — five banking projects with realistic, contradictory evidence." />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {filtered.map((p) => (

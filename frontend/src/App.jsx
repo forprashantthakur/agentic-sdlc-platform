@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import AppShell from './components/AppShell'
+import DemoLibrary from './components/DemoLibrary'
 import { ToastProvider, useToast } from './components/ui'
 import { api } from './lib/api'
 import Dashboard from './pages/Dashboard'
@@ -12,6 +13,7 @@ function Shell() {
   const [run, setRun] = useState(null)
   const [health, setHealth] = useState(null)
   const [pending, setPending] = useState(0)
+  const [library, setLibrary] = useState(false)
   const toast = useToast()
   const nav = useNavigate()
 
@@ -26,25 +28,15 @@ function Shell() {
     return () => clearInterval(t)
   }, [])
 
-  const seed = async () => {
-    try {
-      const p = await api.seedProject()
-      setProject(p)
-      toast('Demo project loaded', {
-        tone: 'success',
-        detail: 'Three deliberately contradictory sources. Agent 1 will flag the conflict rather than resolve it.',
-        duration: 6500,
-      })
-      nav('/new')
-    } catch (e) {
-      toast('Could not load the demo project', { tone: 'error', detail: e.message })
-    }
-  }
-
   return (
     <AppShell pending={pending} project={project} health={health}>
+      <DemoLibrary
+        open={library}
+        onClose={() => setLibrary(false)}
+        onSeeded={(p) => { setProject(p); nav('/new') }}
+      />
       <Routes>
-        <Route path="/" element={<Dashboard setProject={setProject} onSeed={seed} />} />
+        <Route path="/" element={<Dashboard setProject={setProject} onSeed={() => setLibrary(true)} />} />
         <Route path="/new" element={<NewBrd project={project} setProject={setProject} run={run} setRun={setRun} />} />
         <Route path="/projects" element={<Projects setProject={setProject} />} />
         <Route path="/knowledge" element={<Knowledge project={project} />} />
