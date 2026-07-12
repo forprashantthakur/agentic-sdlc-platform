@@ -8,6 +8,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '../lib/utils'
 import { Badge, Tooltip } from './ui'
 import Copilot from './Copilot'
+import BrandLogo from './BrandLogo'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -36,16 +37,8 @@ export default function AppShell({ children, pending = 0, project, health }) {
     <div className="min-h-screen bg-bg text-ink flex">
       <aside className={cn('sticky top-0 h-screen shrink-0 border-r border-line bg-surface flex flex-col transition-[width] duration-200',
         collapsed ? 'w-[68px]' : 'w-[248px]')}>
-        <div className="h-16 flex items-center gap-2.5 px-4 border-b border-line">
-          <div className="h-9 w-9 shrink-0 rounded-lg bg-brand grid place-items-center shadow-sm">
-            <span className="text-brand-fg font-bold text-[15px]">H</span>
-          </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <div className="text-[13px] font-semibold leading-tight truncate">HDFC Bank</div>
-              <div className="text-[10.5px] text-muted leading-tight">Agentic SDLC Platform</div>
-            </div>
-          )}
+        <div className={cn('h-16 flex items-center border-b border-line', collapsed ? 'justify-center px-2' : 'px-3')}>
+          <BrandLogo collapsed={collapsed} />
         </div>
 
         <nav className="flex-1 overflow-y-auto p-2.5 space-y-0.5">
