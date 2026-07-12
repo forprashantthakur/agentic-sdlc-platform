@@ -336,3 +336,23 @@ context, and — deliberately — **a real conflict and a real gap**:
 brilliant and prove nothing. What is worth demonstrating is Agent 1 *escalating* the disagreement
 instead of quietly picking a side — because an agent that silently resolves an ambiguity is a
 liability in a bank, and one that flags it is an analyst.
+
+
+---
+
+## About MOCK_MODE (read this before you demo)
+
+The mock is **extractive, not scripted**. It reads the evidence it is actually given, pulls out the
+sentences that look like requirements, cites the source and line, flags the disagreements and the
+silences, and derives the downstream documents from that. It does not reason. The prose is plainer
+than Gemini's and the sizing is deterministic.
+
+The first version of this mock returned canned UPI AutoPay content for *every* task. That made the
+UPI demo look brilliant and produced a UPI mandate BRD for a foreign-exchange project. A mock that
+answers a question it wasn't asked is worse than no mock: it hides precisely the failure it should
+expose. It was caught in a demo, which is exactly where you don't want to find it.
+
+So MOCK_MODE now proves the *machinery* — retrieval, gates, versioning, traceability, export —
+honestly, on whatever project you point it at. It is not a substitute for the model. For real
+reasoning, set `MOCK_MODE=false` and `GOOGLE_API_KEY`, and verify with
+`GET /api/integrations/llm/selftest`.

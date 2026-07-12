@@ -1,434 +1,654 @@
-"""Deterministic offline brain.
+"""Deterministic offline brain — EXTRACTIVE, not scripted.
 
-MOCK_MODE exists so a reviewer can `docker compose up` with an empty .env and watch
-all six agents, both approval gates, RAG retrieval and artifact versioning run
-end-to-end. Payloads are canned but schema-conformant and domain-realistic
-(HDFC UPI-autopay flavoured); anything not canned falls back to a schema-driven
-filler so the pipeline never breaks on a schema change.
+The first version of this file returned canned UPI AutoPay payloads for every task. That made the
+UPI demo look brilliant and produced a UPI BRD for a foreign-exchange project. A mock that answers
+a question it wasn't asked is worse than no mock: it hides exactly the failure it should expose.
+
+So this one reads the evidence it is actually given. It pulls the source text out of the prompt and
+derives requirements, conflicts, gaps and downstream documents from *that*. It does not reason —
+it extracts, with deterministic heuristics — so the prose is plainer than Gemini's. But it is about
+the right project, it cites real lines from real sources, and when the sources disagree it says so.
+
+MOCK_MODE exists to prove the machinery (retrieval, gates, versioning, traceability, export) end to
+end without a credential. It is not a substitute for the model, and it now behaves like something
+that knows the difference.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from typing import Any
 
-_SEEDLESS = "unknown"
+# ─────────────────────────── prompt archaeology ───────────────────────────────
+# The body must stop at the next source OR at the end of the evidence block. Without the second
+# half of that lookahead, the last source swallows the TASK instructions that follow it — and the
+# extractor happily "finds" a requirement inside my own prompt. Which it did, once, in testing.
+SOURCE_RE = re.compile(
+    r"### SOURCE \[(?P<kind>[A-Z_]+)\] (?P<title>.+?)\n\(id=.*?\)\n(?P<body>.*?)"
+    r"(?=\n### SOURCE |\n--- |\nTASK\n|\nRETRIEVED |\Z)",
+    re.S,
+)
+
+# Belt and braces: even inside a source body, a line that is obviously part of an instruction is
+# not evidence. Prompt text must never become a requirement.
+PROMPT_LEAK = re.compile(
+    r"\b(emit a `?conflict|do NOT|Set `?confidence|source_evidence|requirement ids|BR-001, BR-002|"
+    r"hallucination|Extract every distinct|TASK\b)", re.I,
+)
+JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}")
+
+MODAL = re.compile(
+    r"\b(must|shall|should|will need to|needs to|has to|mandatory|required|non-negotiable|"
+    r"cannot|may not|not permitted|is not negotiable)\b", re.I,
+)
+DECISION = re.compile(r"^\s*\d*\s*(DECISION|AGREED|RESOLVED)\s*[:\-]", re.I)
+
+# The language of an unresolved argument. Our seed corpora are full of it, and so is real discovery.
+CONFLICT_MARK = re.compile(
+    r"\b(UNRESOLVED|disagreed|pushed back|I am not convinced|I do not agree|too low|too high|"
+    r"rejected it|I will not sign|the answer is no|I think that is|but I have thought about it|"
+    r"having looked at|I know I pushed back)\b", re.I,
+)
+# The language of something nobody thought about.
+GAP_MARK = re.compile(
+    r"\b(nobody (has )?(mentioned|asked|discussed|designed|answered)|we have not (decided|talked|discussed)|"
+    r"I do not have (a good answer|that number)|there isn'?t one|has not been (decided|designed)|"
+    r"needs a plan|write (that|it) down|park it|somebody needs to|that needs to be in the requirements|"
+    r"I did not know that|no SLA|it is not small|is unspecified|not been decided)\b", re.I,
+)
+COMPLIANCE = re.compile(
+    r"\b(RBI|FEMA|PMLA|KYC|AML|DPDP|PCI|SEBI|IRDAI|regulat|complian|audit|circular|statutory|"
+    r"master direction|localisation|retention|FIU|STR)\b", re.I,
+)
+INTEGRATION = re.compile(
+    r"\b(integrat|API|switch|NPCI|Visa|Mastercard|RuPay|core banking|Finacle|ESB|vendor|feed|"
+    r"network|downstream|upstream|platform)\b", re.I,
+)
+DATA = re.compile(r"\b(data|record|retention|storage|database|audit trail|log|report)\b", re.I)
+NFR_HINT = re.compile(r"\b(latency|second|seconds|availab|uptime|throughput|scale|performance|p95|TAT)\b", re.I)
+
+
+def _clean(line: str) -> str:
+    """Meeting notes arrive as '12 DECISION: retail customers must...'. Strip the scaffolding."""
+    line = re.sub(r"^\s*\d{1,3}\s+", "", line)                       # leading line number
+    line = re.sub(r"^\s*\d{2}:\d{2}:\d{2}\s+\w+:\s*", "", line)      # transcript timestamp + speaker
+    line = re.sub(r"^\s*[-•*]\s*", "", line)                          # bullet
+    line = re.sub(r"^(DECISION|AGREED|RESOLVED|UNRESOLVED|ACTION)\s*[:\-]\s*", "", line, flags=re.I)
+    return " ".join(line.split()).strip()
+
+
+def _sentences(body: str) -> list[tuple[int, str]]:
+    out: list[tuple[int, str]] = []
+    for i, raw in enumerate(body.split("\n"), 1):
+        text = _clean(raw)
+        if len(text) < 25 or PROMPT_LEAK.search(text):
+            continue
+        out.append((i, text))
+    return out
+
+
+def _parse_sources(prompt: str) -> list[dict[str, Any]]:
+    return [
+        {"kind": m.group("kind"), "title": m.group("title").strip(), "body": m.group("body")}
+        for m in SOURCE_RE.finditer(prompt)
+    ]
+
+
+def _parse_json_from_prompt(prompt: str, key: str) -> dict[str, Any]:
+    """Downstream agents receive upstream JSON inline. Recover it so the chain stays coherent."""
+    for m in re.finditer(r"\{[\s\S]{40,}?\n\}", prompt):
+        try:
+            obj = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+        if key in obj:
+            return obj
+    return {}
+
+
+def _project(prompt: str) -> str:
+    m = re.search(r"^PROJECT:\s*(.+)$", prompt, re.M)
+    return m.group(1).strip() if m else "the capability"
 
 
 def _h(s: str, n: int) -> int:
     return int(hashlib.sha256(s.encode()).hexdigest(), 16) % max(n, 1)
 
 
-# ────────────────────────── canned, domain-realistic payloads ─────────────────
-def _requirements() -> dict:
+# ─────────────────────────── requirement extraction ───────────────────────────
+def _categorise(text: str) -> str:
+    if COMPLIANCE.search(text):
+        return "COMPLIANCE"
+    if INTEGRATION.search(text):
+        return "INTEGRATION"
+    if NFR_HINT.search(text):
+        return "NON_FUNCTIONAL"
+    if DATA.search(text):
+        return "DATA"
+    return "FUNCTIONAL"
+
+
+def _priority(text: str) -> str:
+    if re.search(r"\b(must|shall|mandatory|non-negotiable|not negotiable|cannot|may not|will not)\b", text, re.I):
+        return "MUST"
+    if re.search(r"\bshould\b", text, re.I):
+        return "SHOULD"
+    return "SHOULD"
+
+
+def _title(text: str, n: int = 9) -> str:
+    words = re.sub(r"^(the|a|an)\s+", "", text, flags=re.I).split()
+    t = " ".join(words[:n]).rstrip(",;:.")
+    return t[:1].upper() + t[1:]
+
+
+def _requirements(prompt: str) -> dict[str, Any]:
+    sources = _parse_sources(prompt)
+    project = _project(prompt)
+
+    candidates: list[dict[str, Any]] = []
+    conflicts_raw: list[dict[str, str]] = []
+    gaps: list[str] = []
+
+    for s in sources:
+        for line_no, text in _sentences(s["body"]):
+            cite = f"{s['title']}, line {line_no}"
+
+            if GAP_MARK.search(text):
+                gaps.append(f"{text} — raised in {s['title']} and left unresolved.")
+                continue
+
+            if CONFLICT_MARK.search(text):
+                conflicts_raw.append({"text": text, "cite": cite, "source": s["title"]})
+                # a contested statement is still a requirement candidate, just a shakier one
+                if MODAL.search(text) or DECISION.match(text):
+                    candidates.append({"text": text, "cite": cite, "contested": True})
+                continue
+
+            if DECISION.match(text) or MODAL.search(text):
+                candidates.append({"text": text, "cite": cite, "contested": False})
+
+    # Deduplicate on the opening of the sentence; discovery material repeats itself constantly.
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for c in candidates:
+        key = " ".join(c["text"].lower().split()[:6])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(c)
+
+    # Prefer explicit decisions and compliance statements — they are what a BA writes down first.
+    def rank(c: dict) -> tuple[int, int]:
+        t = c["text"]
+        score = 0
+        if DECISION.match(t):
+            score += 3
+        if COMPLIANCE.search(t):
+            score += 2
+        if re.search(r"\b(must|shall|mandatory)\b", t, re.I):
+            score += 2
+        if c["contested"]:
+            score -= 1
+        return (-score, len(t))
+
+    unique.sort(key=rank)
+    unique = unique[:8]
+
+    requirements = []
+    for i, c in enumerate(unique, 1):
+        contested = c["contested"]
+        requirements.append({
+            "id": f"BR-{i:03d}",
+            "title": _title(c["text"]),
+            "statement": c["text"],
+            "category": _categorise(c["text"]),
+            "priority": _priority(c["text"]),
+            "actors": _actors(c["text"]),
+            "source_evidence": [c["cite"]],
+            # Contested statements are honestly less certain. That number is the whole point of
+            # showing a confidence score at all.
+            "confidence": round(0.62 + (_h(c["text"], 12) / 100), 2) if contested
+                          else round(0.84 + (_h(c["text"], 12) / 100), 2),
+            "open_question": "Contested in the evidence — see conflicts." if contested else "",
+        })
+
+    conflicts = []
+    for c in conflicts_raw[:4]:
+        related = [r["id"] for r in requirements
+                   if _overlap(r["statement"], c["text"]) or r["open_question"]]
+        conflicts.append({
+            "description": f"{c['text']} (stated in {c['source']}) — this contradicts or reopens a "
+                           f"decision recorded elsewhere in the evidence.",
+            "requirement_ids": related[:2],
+            "resolution_needed_from": _owner(c["text"]) or "Project sponsor",
+        })
+
+    stakeholders = _stakeholders(prompt, sources)
+
     return {
-        "requirements": [
-            {
-                "id": "BR-001",
-                "title": "Customer self-service UPI AutoPay mandate creation",
-                "statement": "A retail customer must be able to create a UPI AutoPay mandate from the MobileBanking app without calling the branch or contacting the call centre.",
-                "category": "FUNCTIONAL",
-                "priority": "MUST",
-                "actors": ["Retail Customer", "Core Banking System", "NPCI UPI Switch"],
-                "source_evidence": ["Meeting notes 2026-06-18, line 12", "Email from Head of Payments, 2026-06-20"],
-                "confidence": 0.92,
-                "open_question": "",
-            },
-            {
-                "id": "BR-002",
-                "title": "Mandate cap of INR 1,00,000 without additional factor",
-                "statement": "Mandates up to INR 1,00,000 execute without AFA; above that threshold the customer must authenticate per RBI e-mandate guidelines.",
-                "category": "COMPLIANCE",
-                "priority": "MUST",
-                "actors": ["Retail Customer", "Risk Engine"],
-                "source_evidence": ["Voice transcript 2026-06-21, 00:14:30"],
-                "confidence": 0.88,
-                "open_question": "",
-            },
-            {
-                "id": "BR-003",
-                "title": "Pause, modify and revoke an active mandate",
-                "statement": "Customers can pause, modify the cap of, or revoke an active mandate; changes take effect before the next debit cycle.",
-                "category": "FUNCTIONAL",
-                "priority": "MUST",
-                "actors": ["Retail Customer"],
-                "source_evidence": ["Meeting notes 2026-06-18, line 31"],
-                "confidence": 0.9,
-                "open_question": "",
-            },
-            {
-                "id": "BR-004",
-                "title": "Pre-debit notification 24 hours before execution",
-                "statement": "The system sends a pre-debit notification 24h before each mandate execution over push and SMS.",
-                "category": "COMPLIANCE",
-                "priority": "MUST",
-                "actors": ["Notification Service", "Retail Customer"],
-                "source_evidence": ["Email from Compliance, 2026-06-22"],
-                "confidence": 0.95,
-                "open_question": "",
-            },
-            {
-                "id": "BR-005",
-                "title": "Failed-debit retry and dunning",
-                "statement": "On insufficient balance the mandate retries per merchant-configured policy, capped at 3 attempts in 72 hours.",
-                "category": "FUNCTIONAL",
-                "priority": "SHOULD",
-                "actors": ["Merchant", "Payments Engine"],
-                "source_evidence": ["Voice transcript 2026-06-21, 00:22:10"],
-                "confidence": 0.71,
-                "open_question": "Is the retry cap merchant-configurable or bank-fixed? Conflicting statements between the meeting notes and the transcript.",
-            },
-        ],
-        "stakeholders": [
-            {"name": "Head of Payments", "role": "Business Sponsor", "email": "payments.head@hdfcbank.com"},
-            {"name": "Compliance Officer", "role": "Regulatory Approver", "email": "compliance@hdfcbank.com"},
-            {"name": "Digital Channels Product Owner", "role": "Product Owner", "email": "po.digital@hdfcbank.com"},
-        ],
-        "conflicts": [
-            {
-                "description": "Retry cap: meeting notes say bank-fixed at 3; the sponsor's voice transcript says merchant-configurable.",
-                "requirement_ids": ["BR-005"],
-                "resolution_needed_from": "Head of Payments",
-            }
-        ],
-        "gaps": [
-            "No stated requirement for mandate behaviour when the underlying account is frozen or dormant.",
-            "Data-retention period for revoked mandates is unspecified.",
-        ],
-        "summary": "Five business requirements extracted from 3 sources for the UPI AutoPay self-service capability. One conflict and two gaps require human resolution before the concept note is finalised.",
+        "requirements": requirements,
+        "stakeholders": stakeholders,
+        "conflicts": conflicts,
+        "gaps": _dedupe(gaps)[:6],
+        "summary": (
+            f"{len(requirements)} business requirements extracted from {len(sources)} source(s) for "
+            f"{project}. {len(conflicts)} conflict(s) and {len(_dedupe(gaps)[:6])} gap(s) require human "
+            f"resolution before the concept note is finalised."
+        ),
     }
 
 
-def _concept_note() -> dict:
+def _overlap(a: str, b: str) -> bool:
+    wa = {w for w in re.findall(r"[a-z]{5,}", a.lower())}
+    wb = {w for w in re.findall(r"[a-z]{5,}", b.lower())}
+    return len(wa & wb) >= 3
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen, out = set(), []
+    for i in items:
+        k = " ".join(i.lower().split()[:6])
+        if k not in seen:
+            seen.add(k)
+            out.append(i)
+    return out
+
+
+ROLE_RE = re.compile(
+    r"\b(Head of [A-Z][\w &]+|Chief [A-Z][\w ]+Officer|MD,? [A-Z][\w ]+|[A-Z][\w ]{2,20} (Lead|Officer|Head|PO|Manager)|"
+    r"Compliance|Market Risk|Fraud Risk|Internal Audit|Model Risk Management|Data Privacy Officer|CISO Office|"
+    r"Ops Head|Dealing Desk Head|Data Science Lead)\b"
+)
+EMAIL_RE = re.compile(r"([A-Za-z][\w .'-]{2,40})\s*<([\w.+-]+@[\w.-]+)>")
+
+
+def _stakeholders(prompt: str, sources: list[dict]) -> list[dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    blob = "\n".join(s["body"] for s in sources)
+
+    for name, email in EMAIL_RE.findall(blob):
+        n = name.strip()
+        if n and n not in out:
+            out[n] = {"name": n, "role": n, "email": email}
+
+    for m in ROLE_RE.findall(blob):
+        role = m[0] if isinstance(m, tuple) else m
+        role = role.strip()
+        if role and role not in out and len(out) < 8:
+            out[role] = {"name": role, "role": role, "email": ""}
+
+    return list(out.values())[:8]
+
+
+def _owner(text: str) -> str:
+    m = ROLE_RE.search(text)
+    return m.group(0).strip() if m else ""
+
+
+ACTOR_RE = re.compile(
+    r"\b(customer|corporate|merchant|analyst|agent|dealer|applicant|client|back office|"
+    r"call centre|branch|regulator|vendor)\b", re.I,
+)
+
+
+def _actors(text: str) -> list[str]:
+    found = {a.title() for a in ACTOR_RE.findall(text)}
+    return sorted(found)[:4] or ["System"]
+
+
+# ─────────────────────── downstream derivations ───────────────────────────────
+def _concept_note(prompt: str) -> dict[str, Any]:
+    reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
+    project = _project(prompt)
+    ctx = _context_lines(prompt)
+
+    compliance = [r for r in reqs if r["category"] == "COMPLIANCE"]
+    must = [r for r in reqs if r["priority"] == "MUST"]
+
     return {
-        "title": "Concept Note — UPI AutoPay Self-Service (MobileBanking)",
-        "business_objectives": [
-            "Reduce mandate-related call-centre volume by 40% within two quarters of launch.",
-            "Increase active recurring-payment mandates per retail customer from 0.4 to 1.1.",
-            "Achieve mandate creation completion rate ≥ 85% (from the current assisted-channel 62%).",
+        "title": f"Concept Note — {project}",
+        "business_objectives": ctx.get("objectives") or [
+            f"Deliver {project} as specified by the approved business requirements.",
+            "Reduce manual effort in the current journey and improve customer outcomes.",
         ],
-        "scope": [
-            "UPI AutoPay mandate creation, pause, modify, revoke in MobileBanking (iOS + Android).",
-            "Pre-debit notification over push and SMS.",
-            "Mandate dashboard listing active, paused and revoked mandates.",
-            "Integration with the NPCI UPI switch and the Core Banking mandate registry.",
-        ],
-        "out_of_scope": [
-            "NetBanking web parity (planned for a follow-on release).",
-            "Corporate / current-account mandates.",
-            "e-NACH and card-on-file mandates.",
-            "Merchant-side onboarding portal.",
+        "scope": [r["title"] for r in must[:6]] or [f"{project} — core capability"],
+        "out_of_scope": ctx.get("out_of_scope") or [
+            "Anything not explicitly traced to a business requirement in this release.",
+            "Channels, products and customer segments not named in the evidence.",
         ],
         "business_rules": [
-            {"id": "BRULE-01", "rule": "Mandates ≤ INR 1,00,000 execute without AFA; above that, AFA is mandatory."},
-            {"id": "BRULE-02", "rule": "A pre-debit notification is sent 24h ± 15min before every execution."},
-            {"id": "BRULE-03", "rule": "Maximum 3 debit retries within 72 hours of the first failure."},
-            {"id": "BRULE-04", "rule": "Revocation is irreversible; a new mandate must be created to resume."},
-            {"id": "BRULE-05", "rule": "Mandates on frozen or dormant accounts are auto-paused, not revoked."},
-        ],
+            {"id": f"BRULE-{i:02d}", "rule": r["statement"]}
+            for i, r in enumerate(compliance + [x for x in must if x not in compliance], 1)
+        ][:8] or [{"id": "BRULE-01", "rule": "To be ratified — no decision rule stated in the evidence."}],
         "assumptions": [
-            "NPCI UPI AutoPay APIs remain at spec v2.3 through the delivery window.",
-            "The existing MobileBanking authentication (MPIN + device binding) is sufficient for AFA.",
-            "Core Banking exposes the mandate registry via the existing ESB.",
+            "The evidence base is complete for release 1; anything absent is captured as a gap.",
+            "Named regulatory constraints apply as stated and have not changed since the workshop.",
         ],
         "dependencies": [
-            {"name": "NPCI UPI Switch", "type": "EXTERNAL", "impact": "Mandate registration and execution cannot proceed without switch certification."},
-            {"name": "Core Banking (Finacle) mandate registry", "type": "INTERNAL", "impact": "Source of truth for mandate state."},
-            {"name": "Notification platform", "type": "INTERNAL", "impact": "Pre-debit notification SLA."},
-            {"name": "Compliance sign-off (RBI e-mandate)", "type": "REGULATORY", "impact": "Hard gate before production release."},
-        ],
-        "risks": [
-            {"id": "RISK-01", "risk": "NPCI certification slips beyond the release window.", "likelihood": "MEDIUM", "impact": "HIGH", "mitigation": "Book the certification slot at sprint 1; run a parallel sandbox track."},
-            {"id": "RISK-02", "risk": "Pre-debit notification SLA breach triggers regulatory observation.", "likelihood": "LOW", "impact": "HIGH", "mitigation": "Dedicated notification queue with a 15-minute SLA alarm and a fallback SMS path."},
-            {"id": "RISK-03", "risk": "Unresolved retry-cap conflict causes rework in the FRD.", "likelihood": "HIGH", "impact": "MEDIUM", "mitigation": "Escalated to the Head of Payments at the concept-note approval gate."},
-        ],
-        "success_metrics": [
-            "Call-centre mandate tickets ↓ 40% (baseline: 12,400/month).",
-            "Mandate creation completion rate ≥ 85%.",
-            "p95 mandate creation latency ≤ 2.5s end-to-end.",
+            {"name": d, "type": "EXTERNAL" if COMPLIANCE.search(d) is None else "REGULATORY",
+             "impact": "Named in the evidence as a dependency; delivery cannot proceed without it."}
+            for d in _dependencies(reqs)
+        ] or [{"name": "None identified in the evidence", "type": "INTERNAL",
+               "impact": "No dependency was stated — this is itself a gap worth confirming."}],
+        "risks": _risks(prompt, reqs),
+        "success_metrics": ctx.get("kpis") or [
+            "No measurable success metric was stated in the evidence — this must be supplied.",
         ],
     }
 
 
-def _wireframe() -> dict:
-    return {
-        "screens": [
-            {
-                "name": "Mandate Dashboard",
-                "purpose": "Entry point listing all mandates by state.",
-                "components": [
-                    {"type": "AppBar", "label": "AutoPay", "props": {"trailing": "help-icon"}},
-                    {"type": "SegmentedControl", "label": "Active | Paused | Revoked", "props": {"default": "Active"}},
-                    {"type": "CardList", "label": "Mandate cards", "props": {"item": "merchant, cap, next debit date, status pill"}},
-                    {"type": "PrimaryButton", "label": "Create new mandate", "props": {"position": "bottom-sticky"}},
-                    {"type": "EmptyState", "label": "No mandates yet", "props": {"cta": "Create your first AutoPay"}},
-                ],
-                "requirement_ids": ["BR-003"],
-            },
-            {
-                "name": "Create Mandate — Details",
-                "purpose": "Capture merchant, cap amount, frequency and validity.",
-                "components": [
-                    {"type": "SearchField", "label": "Merchant / UPI ID", "props": {"validation": "VPA format"}},
-                    {"type": "AmountField", "label": "Maximum amount per debit", "props": {"hint": "AFA required above ₹1,00,000"}},
-                    {"type": "Dropdown", "label": "Frequency", "props": {"options": "Daily, Weekly, Monthly, Quarterly, As presented"}},
-                    {"type": "DateRange", "label": "Valid from / Valid until", "props": {}},
-                    {"type": "InlineAlert", "label": "AFA notice", "props": {"visible_when": "amount > 100000"}},
-                    {"type": "PrimaryButton", "label": "Continue", "props": {}},
-                ],
-                "requirement_ids": ["BR-001", "BR-002"],
-            },
-            {
-                "name": "Create Mandate — Review & Authorise",
-                "purpose": "Confirm terms and authorise with MPIN.",
-                "components": [
-                    {"type": "SummaryList", "label": "Mandate terms", "props": {}},
-                    {"type": "Checkbox", "label": "I authorise HDFC Bank to debit as per these terms", "props": {"required": True}},
-                    {"type": "MPINPad", "label": "Enter MPIN", "props": {"attempts": 3}},
-                    {"type": "PrimaryButton", "label": "Authorise mandate", "props": {}},
-                ],
-                "requirement_ids": ["BR-001", "BR-002"],
-            },
-            {
-                "name": "Mandate Detail — Manage",
-                "purpose": "Pause, modify cap, or revoke an existing mandate.",
-                "components": [
-                    {"type": "StatusPill", "label": "Active", "props": {}},
-                    {"type": "DetailList", "label": "Merchant, cap, frequency, next debit, created on", "props": {}},
-                    {"type": "TimelineList", "label": "Debit history", "props": {"limit": 10}},
-                    {"type": "SecondaryButton", "label": "Pause mandate", "props": {}},
-                    {"type": "SecondaryButton", "label": "Modify cap", "props": {}},
-                    {"type": "DestructiveButton", "label": "Revoke mandate", "props": {"confirm": "irreversible"}},
-                ],
-                "requirement_ids": ["BR-003"],
-            },
-            {
-                "name": "Pre-debit Notification",
-                "purpose": "24h-ahead notification with a one-tap pause affordance.",
-                "components": [
-                    {"type": "PushCard", "label": "₹499 to Netflix will be debited tomorrow", "props": {}},
-                    {"type": "QuickAction", "label": "Pause this mandate", "props": {}},
-                ],
-                "requirement_ids": ["BR-004"],
-            },
-        ],
-        "design_system": "HDFC MobileBanking DS v4 — Navy #004C8F primary, Red #ED232A accent, 8pt grid, Inter typeface",
-        "flow": "Dashboard → Create Mandate (Details) → Review & Authorise → Success → Dashboard; Dashboard → Mandate Detail → Pause/Modify/Revoke",
-        "notes": "Wireframes are low-fidelity greybox at this stage; visual design applies the HDFC DS in a later cycle.",
-    }
+def _context_lines(prompt: str) -> dict[str, list[str]]:
+    """The intake form is indexed as evidence, so its fields turn up in the retrieved context."""
+    out: dict[str, list[str]] = {}
+    if m := re.search(r"Business Objective:\s*(.+)", prompt):
+        out["objectives"] = [m.group(1).strip()]
+    if m := re.search(r"Business Kpis:\s*(.+)", prompt):
+        out["kpis"] = [k.strip() for k in m.group(1).split(",") if k.strip()]
+    return out
 
 
-def _brd() -> dict:
-    return {
-        "document_type": "BRD",
-        "title": "Business Requirements Document — UPI AutoPay Self-Service",
-        "sections": [
-            {"heading": "1. Executive Summary", "body": "HDFC Bank will enable retail customers to create and manage UPI AutoPay mandates directly in MobileBanking, removing the current dependency on assisted channels. The capability targets a 40% reduction in mandate-related call-centre volume and materially lifts recurring-payment penetration in the retail book."},
-            {"heading": "2. Business Context & Problem Statement", "body": "Mandate creation today is an assisted journey with a 62% completion rate and an average handling time of 7.4 minutes at the call centre. Competing banks already offer in-app mandate management, and the bank is losing recurring-payment share to third-party UPI apps."},
-            {"heading": "3. Business Objectives", "body": "O1: Reduce mandate call-centre volume 40% within two quarters.\nO2: Lift active mandates per retail customer from 0.4 to 1.1.\nO3: Reach ≥85% mandate-creation completion rate."},
-            {"heading": "4. Scope", "body": "In scope: mandate create / pause / modify / revoke in MobileBanking (iOS, Android); mandate dashboard; pre-debit notifications; NPCI UPI switch and Finacle mandate-registry integration.\nOut of scope: NetBanking parity, corporate mandates, e-NACH, card-on-file mandates, merchant onboarding portal."},
-            {"heading": "5. Stakeholders", "body": "Business Sponsor — Head of Payments. Regulatory Approver — Compliance. Product Owner — Digital Channels. Delivery — Payments Engineering. Operations — Digital Support."},
-            {"heading": "6. Business Requirements", "body": "BR-001 Self-service mandate creation (MUST).\nBR-002 INR 1,00,000 AFA threshold (MUST, compliance).\nBR-003 Pause / modify / revoke (MUST).\nBR-004 24h pre-debit notification (MUST, compliance).\nBR-005 Failed-debit retry and dunning (SHOULD)."},
-            {"heading": "7. Business Rules", "body": "BRULE-01..05 as ratified in the approved Concept Note, including the AFA threshold, notification window, retry cap, irreversibility of revocation, and auto-pause on frozen accounts."},
-            {"heading": "8. Assumptions, Dependencies & Risks", "body": "Assumes NPCI UPI AutoPay API v2.3 stability. Depends on NPCI certification, the Finacle mandate registry via ESB, the notification platform, and RBI e-mandate compliance sign-off. Principal risk is NPCI certification slippage (MEDIUM/HIGH), mitigated by booking the certification slot in sprint 1."},
-            {"heading": "9. Success Metrics", "body": "Call-centre mandate tickets ↓40%; completion rate ≥85%; p95 mandate-creation latency ≤2.5s."},
-            {"heading": "10. Regulatory Considerations", "body": "RBI e-mandate framework for recurring transactions: AFA threshold, pre-debit notification, and customer-initiated revocation without merchant dependency. Audit trail retained for 8 years per bank record-retention policy."},
-        ],
-        "traceability": [
-            {"requirement_id": "BR-001", "section": "6. Business Requirements"},
-            {"requirement_id": "BR-002", "section": "6. Business Requirements"},
-            {"requirement_id": "BR-003", "section": "6. Business Requirements"},
-            {"requirement_id": "BR-004", "section": "6. Business Requirements"},
-            {"requirement_id": "BR-005", "section": "6. Business Requirements"},
-        ],
-    }
+DEP_RE = re.compile(
+    r"\b(NPCI|Visa|Mastercard|RuPay|Finacle|core banking|ESB|vendor|FIU-IND|Income Tax database|"
+    r"Aadhaar|rate feed|dealing desk|network|switch|certification)\b", re.I,
+)
 
 
-def _frd() -> dict:
-    return {
-        "document_type": "FRD",
-        "title": "Functional Requirements Document — UPI AutoPay Self-Service",
-        "sections": [
-            {"heading": "1. Purpose", "body": "Decomposes the approved BRD into implementable functional behaviour for the MobileBanking app, the AutoPay BFF, and the mandate service."},
-            {"heading": "2. Actors & Roles", "body": "Retail Customer; MobileBanking App; AutoPay BFF; Mandate Service; Risk Engine; NPCI UPI Switch; Notification Service; Finacle Core."},
-            {"heading": "3. FR-01 Mandate Creation", "body": "Given an authenticated customer, when they submit merchant VPA, cap amount, frequency and validity, the system SHALL validate the VPA against the NPCI directory, evaluate the AFA rule (cap > ₹1,00,000 ⇒ AFA), collect MPIN authorisation, register the mandate with the UPI switch, persist it in the registry with state ACTIVE, and return a mandate reference within 2.5s (p95)."},
-            {"heading": "4. FR-02 Mandate State Machine", "body": "States: DRAFT → PENDING_AUTH → ACTIVE → (PAUSED ⇄ ACTIVE) → REVOKED | EXPIRED. Transitions to REVOKED are terminal. AUTO_PAUSED is entered on account freeze/dormancy and can only be cleared by the account returning to ACTIVE."},
-            {"heading": "5. FR-03 Pause / Modify / Revoke", "body": "The system SHALL apply pause, cap-modification and revocation before the next debit cycle and SHALL propagate the change to the UPI switch within 60 seconds; failures are retried with exponential backoff and surfaced to the customer as PENDING_SYNC."},
-            {"heading": "6. FR-04 Pre-debit Notification", "body": "24h ± 15 min before each scheduled execution the system SHALL emit a push notification and an SMS containing merchant, amount, execution date, and a deep link to pause."},
-            {"heading": "7. FR-05 Debit Execution & Retry", "body": "On execution failure with reason INSUFFICIENT_FUNDS the system SHALL retry up to 3 times within 72 hours per the retry policy ratified at the concept-note gate; other failure reasons are terminal for that cycle."},
-            {"heading": "8. FR-06 Mandate Dashboard", "body": "The dashboard SHALL list mandates grouped by state, sorted by next-debit date ascending, paginated at 20 per page."},
-            {"heading": "9. Error Handling", "body": "Every NPCI error code is mapped to a customer-safe message; unmapped codes surface a generic failure and raise a P3 alert. No raw switch error is ever shown to a customer."},
-            {"heading": "10. Audit & Logging", "body": "Every state transition writes an immutable audit record with actor, timestamp, before/after state, and correlation id."},
-        ],
-        "traceability": [
-            {"requirement_id": "BR-001", "section": "3. FR-01 Mandate Creation"},
-            {"requirement_id": "BR-002", "section": "3. FR-01 Mandate Creation"},
-            {"requirement_id": "BR-003", "section": "5. FR-03 Pause / Modify / Revoke"},
-            {"requirement_id": "BR-004", "section": "6. FR-04 Pre-debit Notification"},
-            {"requirement_id": "BR-005", "section": "7. FR-05 Debit Execution & Retry"},
-        ],
-    }
+def _dependencies(reqs: list[dict]) -> list[str]:
+    found = {d.title() for r in reqs for d in DEP_RE.findall(r["statement"])}
+    return sorted(found)[:5]
 
 
-def _srs() -> dict:
-    return {
-        "document_type": "SRS",
-        "title": "Software Requirements Specification — UPI AutoPay Self-Service (IEEE 830 style)",
-        "sections": [
-            {"heading": "1. Introduction", "body": "1.1 Purpose — specifies the software requirements for the AutoPay capability.\n1.2 Scope — MobileBanking client, AutoPay BFF, Mandate Service, and their integrations.\n1.3 Definitions — VPA, AFA, mandate, pre-debit notification, NPCI switch."},
-            {"heading": "2. Overall Description", "body": "2.1 Product perspective — a new bounded context within the Digital Channels estate, fronted by the existing BFF and integrating with Finacle over the ESB.\n2.2 User classes — retail customers, digital-support agents (read-only), compliance auditors (read-only).\n2.3 Constraints — RBI e-mandate rules; data residency in India; a 2.5s p95 latency budget; the existing MPIN authentication scheme."},
-            {"heading": "3. System Architecture", "body": "MobileBanking (React Native) → AutoPay BFF (Kotlin/Spring) → Mandate Service (Java, PostgreSQL) → NPCI UPI Switch adapter. Async execution and retries run on Kafka topics `mandate.execution` and `mandate.retry`. Notifications are published to `notification.predebit`."},
-            {"heading": "4. Data Model", "body": "mandate(id, customer_id, merchant_vpa, cap_amount, frequency, valid_from, valid_to, state, npci_ref, created_at, updated_at); mandate_event(id, mandate_id, type, payload, actor, created_at); debit_attempt(id, mandate_id, cycle_date, amount, status, failure_code, attempt_no)."},
-            {"heading": "5. External Interfaces", "body": "NPCI UPI AutoPay API v2.3 (mandate create/update/revoke/execute); Finacle account-status API; Notification platform (Kafka); the bank's Risk Engine (gRPC)."},
-            {"heading": "6. Non-Functional Requirements", "body": "See the NFR artifact — performance, availability, security, observability, compliance and accessibility requirements are specified there and are normative."},
-            {"heading": "7. Verification", "body": "Each functional requirement maps to at least one acceptance criterion and one automated test; NPCI integration is verified in the sandbox before certification."},
-        ],
-        "traceability": [
-            {"requirement_id": "BR-001", "section": "3. System Architecture"},
-            {"requirement_id": "BR-002", "section": "2. Overall Description"},
-            {"requirement_id": "BR-003", "section": "4. Data Model"},
-            {"requirement_id": "BR-004", "section": "5. External Interfaces"},
-            {"requirement_id": "BR-005", "section": "4. Data Model"},
-        ],
-    }
+def _risks(prompt: str, reqs: list[dict]) -> list[dict[str, str]]:
+    payload = _parse_json_from_prompt(prompt, "requirements")
+    risks = []
+    for i, c in enumerate(payload.get("conflicts", [])[:3], 1):
+        risks.append({
+            "id": f"RISK-{i:02d}",
+            "risk": f"Unresolved conflict carried into build: {c['description'][:150]}",
+            "likelihood": "HIGH", "impact": "MEDIUM",
+            "mitigation": f"Escalate to {c.get('resolution_needed_from', 'the sponsor')} before the "
+                          "concept note is approved. Do not let the FRD assume an answer.",
+        })
+    for j, g in enumerate(payload.get("gaps", [])[:2], len(risks) + 1):
+        risks.append({
+            "id": f"RISK-{j:02d}",
+            "risk": f"Requirement gap: {g[:150]}",
+            "likelihood": "MEDIUM", "impact": "MEDIUM",
+            "mitigation": "Close the gap with the business before the FRD; a guessed requirement here "
+                          "becomes a defect in UAT.",
+        })
+    low = [r for r in reqs if r.get("confidence", 1) < 0.75]
+    if low:
+        risks.append({
+            "id": f"RISK-{len(risks) + 1:02d}",
+            "risk": f"{len(low)} requirement(s) rest on thin or contested evidence.",
+            "likelihood": "MEDIUM", "impact": "MEDIUM",
+            "mitigation": "Confirm each with the named business owner before sign-off.",
+        })
+    return risks or [{"id": "RISK-01", "risk": "No material risk surfaced from the evidence.",
+                      "likelihood": "LOW", "impact": "LOW",
+                      "mitigation": "Revisit once discovery is complete."}]
 
 
-def _user_stories() -> dict:
-    return {
-        "stories": [
-            {"id": "US-01", "as_a": "retail customer", "i_want": "to create a UPI AutoPay mandate in the app", "so_that": "my recurring bills are paid without me remembering them", "requirement_ids": ["BR-001"], "story_points": 8,
-             "acceptance_criteria": [
-                 "GIVEN an authenticated customer WHEN they submit a valid merchant VPA, cap and frequency THEN the mandate is registered with NPCI and shown as ACTIVE within 2.5s (p95)",
-                 "GIVEN a cap above ₹1,00,000 WHEN the customer continues THEN AFA is enforced before authorisation",
-                 "GIVEN an invalid VPA WHEN the customer submits THEN an inline validation error is shown and no mandate is created",
-             ]},
-            {"id": "US-02", "as_a": "retail customer", "i_want": "to see all my mandates in one place", "so_that": "I know what is being debited and when", "requirement_ids": ["BR-003"], "story_points": 5,
-             "acceptance_criteria": [
-                 "GIVEN a customer with mandates WHEN they open AutoPay THEN mandates are grouped by state and sorted by next-debit date ascending",
-                 "GIVEN a customer with no mandates WHEN they open AutoPay THEN the empty state with a create CTA is shown",
-             ]},
-            {"id": "US-03", "as_a": "retail customer", "i_want": "to pause or revoke a mandate", "so_that": "I stay in control of my money", "requirement_ids": ["BR-003"], "story_points": 8,
-             "acceptance_criteria": [
-                 "GIVEN an ACTIVE mandate WHEN the customer pauses it THEN no debit occurs on the next cycle and the switch is updated within 60s",
-                 "GIVEN a REVOKED mandate WHEN the customer views it THEN no reactivation affordance is offered",
-             ]},
-            {"id": "US-04", "as_a": "retail customer", "i_want": "a notification before each debit", "so_that": "I can fund my account or pause the mandate", "requirement_ids": ["BR-004"], "story_points": 5,
-             "acceptance_criteria": [
-                 "GIVEN a scheduled execution WHEN it is 24h ± 15min away THEN a push and an SMS are delivered with merchant, amount and date",
-                 "GIVEN the push is tapped THEN the customer deep-links into the mandate detail screen",
-             ]},
-            {"id": "US-05", "as_a": "merchant", "i_want": "failed debits to be retried", "so_that": "collection rates stay high", "requirement_ids": ["BR-005"], "story_points": 13,
-             "acceptance_criteria": [
-                 "GIVEN an INSUFFICIENT_FUNDS failure WHEN the retry policy allows THEN up to 3 retries occur within 72h",
-                 "GIVEN a non-retryable failure code THEN no retry is attempted and the cycle is marked FAILED",
-             ]},
-            {"id": "US-06", "as_a": "compliance auditor", "i_want": "an immutable audit trail of mandate events", "so_that": "the bank can evidence RBI compliance", "requirement_ids": ["BR-002", "BR-004"], "story_points": 5,
-             "acceptance_criteria": [
-                 "GIVEN any mandate state transition THEN an audit record with actor, timestamp, before/after state and correlation id is written and is immutable",
-             ]},
+def _document(prompt: str, doc_type: str) -> dict[str, Any]:
+    project = _project(prompt)
+    reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
+    concept = _parse_json_from_prompt(prompt, "business_objectives")
+
+    titles = {"BRD": "Business Requirements Document", "FRD": "Functional Requirements Document",
+              "SRS": "Software Requirements Specification"}
+    sections: list[dict[str, str]] = []
+
+    if doc_type == "BRD":
+        sections = [
+            {"heading": "1. Executive Summary",
+             "body": f"{project}. " + " ".join(concept.get("business_objectives", [])[:2])},
+            {"heading": "2. Business Context & Problem Statement",
+             "body": _joined(concept.get("business_objectives", []))
+                     or "Derived from the discovery evidence supplied for this project."},
+            {"heading": "3. Scope", "body": _joined(concept.get("scope", []))},
+            {"heading": "4. Out of Scope", "body": _joined(concept.get("out_of_scope", []))},
+            {"heading": "5. Business Requirements",
+             "body": "\n".join(f"{r['id']} [{r['priority']}] {r['title']} — {r['statement']}" for r in reqs)},
+            {"heading": "6. Business Rules",
+             "body": "\n".join(f"{b['id']}: {b['rule']}" for b in concept.get("business_rules", []))},
+            {"heading": "7. Assumptions, Dependencies & Risks",
+             "body": _joined(concept.get("assumptions", [])) + "\n\n"
+                     + "\n".join(f"{r['id']} ({r['likelihood']}/{r['impact']}): {r['risk']} — {r['mitigation']}"
+                                 for r in concept.get("risks", []))},
+            {"heading": "8. Success Metrics", "body": _joined(concept.get("success_metrics", []))},
         ]
-    }
-
-
-def _api_requirements() -> dict:
-    return {
-        "endpoints": [
-            {"method": "POST", "path": "/v1/mandates", "purpose": "Create a mandate", "auth": "OAuth2 + device binding + MPIN step-up",
-             "request_schema": "{merchantVpa, capAmount, currency, frequency, validFrom, validTo, idempotencyKey}",
-             "response_schema": "{mandateId, npciRef, state, nextDebitDate}",
-             "errors": ["400 INVALID_VPA", "409 DUPLICATE_MANDATE", "422 AFA_REQUIRED", "502 SWITCH_UNAVAILABLE"],
-             "sla_ms": 2500, "idempotent": True, "requirement_ids": ["BR-001", "BR-002"]},
-            {"method": "GET", "path": "/v1/mandates", "purpose": "List mandates for the authenticated customer", "auth": "OAuth2",
-             "request_schema": "?state=ACTIVE|PAUSED|REVOKED&page=1&size=20",
-             "response_schema": "{items:[Mandate], page, size, total}",
-             "errors": ["401 UNAUTHORIZED"], "sla_ms": 800, "idempotent": True, "requirement_ids": ["BR-003"]},
-            {"method": "PATCH", "path": "/v1/mandates/{id}", "purpose": "Pause, resume or modify the cap", "auth": "OAuth2 + MPIN step-up",
-             "request_schema": "{action: PAUSE|RESUME|MODIFY_CAP, capAmount?, idempotencyKey}",
-             "response_schema": "{mandateId, state, syncStatus}",
-             "errors": ["404 NOT_FOUND", "409 ILLEGAL_TRANSITION", "422 AFA_REQUIRED"],
-             "sla_ms": 1500, "idempotent": True, "requirement_ids": ["BR-003"]},
-            {"method": "DELETE", "path": "/v1/mandates/{id}", "purpose": "Revoke a mandate (terminal)", "auth": "OAuth2 + MPIN step-up",
-             "request_schema": "{reason, idempotencyKey}",
-             "response_schema": "{mandateId, state: REVOKED, revokedAt}",
-             "errors": ["404 NOT_FOUND", "409 ALREADY_REVOKED"], "sla_ms": 1500, "idempotent": True, "requirement_ids": ["BR-003"]},
-            {"method": "GET", "path": "/v1/mandates/{id}/debits", "purpose": "Debit history for a mandate", "auth": "OAuth2",
-             "request_schema": "?limit=10", "response_schema": "{items:[DebitAttempt]}",
-             "errors": ["404 NOT_FOUND"], "sla_ms": 800, "idempotent": True, "requirement_ids": ["BR-005"]},
-            {"method": "POST", "path": "/internal/v1/mandates/{id}/execute", "purpose": "Switch-initiated debit execution callback", "auth": "mTLS (NPCI switch)",
-             "request_schema": "{npciRef, cycleDate, amount, signature}",
-             "response_schema": "{status: ACCEPTED}",
-             "errors": ["401 BAD_SIGNATURE", "409 DUPLICATE_EXECUTION"], "sla_ms": 500, "idempotent": True, "requirement_ids": ["BR-005"]},
-        ],
-        "conventions": "REST/JSON, camelCase, RFC 7807 problem+json errors, `Idempotency-Key` header mandatory on every mutating call, `X-Correlation-Id` propagated end-to-end, cursor pagination on collections, API versioning in the path.",
-    }
-
-
-def _nfr() -> dict:
-    return {
-        "nfrs": [
-            {"id": "NFR-PERF-01", "category": "Performance", "requirement": "Mandate creation p95 ≤ 2.5s, p99 ≤ 4s, measured at the BFF edge.", "measurement": "APM p95/p99 over a 7-day rolling window.", "requirement_ids": ["BR-001"]},
-            {"id": "NFR-PERF-02", "category": "Performance", "requirement": "Dashboard listing p95 ≤ 800ms for up to 50 mandates.", "measurement": "Synthetic monitor every 60s.", "requirement_ids": ["BR-003"]},
-            {"id": "NFR-SCAL-01", "category": "Scalability", "requirement": "Sustain 1,200 mandate creations/minute at peak and 40,000 debit executions/hour on the 1st and 5th of each month.", "measurement": "Load test at 1.5× projected peak before go-live.", "requirement_ids": ["BR-001", "BR-005"]},
-            {"id": "NFR-AVAIL-01", "category": "Availability", "requirement": "99.95% monthly availability for customer-facing mandate APIs; graceful degradation to read-only if the switch is down.", "measurement": "Uptime SLO with an error budget policy.", "requirement_ids": ["BR-001"]},
-            {"id": "NFR-SEC-01", "category": "Security", "requirement": "All mutating calls require MPIN step-up and device binding; PII and VPA encrypted at rest (AES-256, HSM-backed keys) and in transit (TLS 1.3).", "measurement": "Annual VAPT + quarterly key-rotation audit.", "requirement_ids": ["BR-001", "BR-002"]},
-            {"id": "NFR-SEC-02", "category": "Security", "requirement": "No customer PII in application logs; VPA masked to the first 3 and last 4 characters.", "measurement": "Automated log-scanner in CI and in production sampling.", "requirement_ids": ["BR-001"]},
-            {"id": "NFR-COMP-01", "category": "Compliance", "requirement": "RBI e-mandate: AFA above ₹1,00,000 and pre-debit notification 24h ahead; audit trail retained 8 years, immutable (WORM).", "measurement": "Compliance attestation before release; quarterly internal audit.", "requirement_ids": ["BR-002", "BR-004"]},
-            {"id": "NFR-DATA-01", "category": "Data Residency", "requirement": "All mandate and customer data stored and processed within India (RBI data-localisation).", "measurement": "Infrastructure attestation; region-pinned resources only.", "requirement_ids": ["BR-001"]},
-            {"id": "NFR-OBS-01", "category": "Observability", "requirement": "Distributed tracing across app → BFF → mandate service → switch with a correlation id; alert on pre-debit notification SLA breach within 5 minutes.", "measurement": "Trace-completeness ≥ 99%; alert MTTA ≤ 5 min.", "requirement_ids": ["BR-004"]},
-            {"id": "NFR-A11Y-01", "category": "Accessibility", "requirement": "WCAG 2.1 AA for all mandate screens; full screen-reader support and a minimum 4.5:1 contrast ratio.", "measurement": "Automated axe scan + manual assistive-tech pass per release.", "requirement_ids": ["BR-001", "BR-003"]},
-            {"id": "NFR-RESIL-01", "category": "Resilience", "requirement": "Switch calls protected by a circuit breaker (50% error rate over 20 calls ⇒ open for 30s); all mutating switch calls idempotent and replay-safe.", "measurement": "Chaos test in pre-prod each quarter.", "requirement_ids": ["BR-005"]},
+    elif doc_type == "FRD":
+        sections = [{"heading": "1. Purpose",
+                     "body": f"Decomposes the approved business requirements for {project} into "
+                             "implementable functional behaviour."}]
+        sections += [
+            {"heading": f"{i + 2}. FR-{i + 1:02d} — {r['title']}",
+             "body": f"The system SHALL: {r['statement']}\n\n"
+                     f"Actors: {', '.join(r.get('actors', []))}\n"
+                     f"Traces to: {r['id']}\n"
+                     f"Evidence: {'; '.join(r.get('source_evidence', []))}"
+                     + (f"\nOPEN QUESTION: {r['open_question']}" if r.get("open_question") else "")}
+            for i, r in enumerate(reqs)
         ]
-    }
+        sections.append({"heading": f"{len(reqs) + 2}. Error Handling & Audit",
+                         "body": "Every state transition writes an immutable audit record with actor, "
+                                 "timestamp, before/after state and a correlation id. No raw downstream "
+                                 "error is surfaced to a customer."})
+    else:  # SRS
+        sections = [
+            {"heading": "1. Introduction",
+             "body": f"Software requirements for {project}, derived from the approved BRD and FRD."},
+            {"heading": "2. Overall Description",
+             "body": _joined(concept.get("scope", [])) + "\n\nConstraints:\n"
+                     + _joined(concept.get("assumptions", []))},
+            {"heading": "3. External Interfaces",
+             "body": "\n".join(f"{d['name']} ({d['type']}) — {d['impact']}"
+                               for d in concept.get("dependencies", []))},
+            {"heading": "4. Data & Retention",
+             "body": "\n".join(r["statement"] for r in reqs if r["category"] == "DATA")
+                     or "No explicit data requirement was stated in the evidence. This is a gap."},
+            {"heading": "5. Compliance Requirements",
+             "body": "\n".join(f"{r['id']}: {r['statement']}" for r in reqs if r["category"] == "COMPLIANCE")
+                     or "No compliance requirement was extracted — verify this with Compliance."},
+            {"heading": "6. Verification",
+             "body": "Each functional requirement maps to at least one acceptance criterion and one "
+                     "automated test."},
+        ]
 
-
-def _sprint_plan() -> dict:
     return {
-        "epics": [
-            {"id": "EPIC-01", "name": "Mandate Lifecycle", "goal": "Create, view, pause, modify and revoke UPI AutoPay mandates in MobileBanking.",
-             "features": [
-                 {"id": "FEAT-01", "name": "Mandate Creation Journey", "story_ids": ["US-01"]},
-                 {"id": "FEAT-02", "name": "Mandate Dashboard & Detail", "story_ids": ["US-02", "US-03"]},
-             ]},
-            {"id": "EPIC-02", "name": "Debit Execution & Notification", "goal": "Execute debits reliably and keep customers informed ahead of every debit.",
-             "features": [
-                 {"id": "FEAT-03", "name": "Pre-debit Notification", "story_ids": ["US-04"]},
-                 {"id": "FEAT-04", "name": "Execution, Failure & Retry", "story_ids": ["US-05"]},
-             ]},
-            {"id": "EPIC-03", "name": "Compliance & Auditability", "goal": "Evidence RBI e-mandate compliance end-to-end.",
-             "features": [
-                 {"id": "FEAT-05", "name": "Immutable Audit Trail", "story_ids": ["US-06"]},
-             ]},
-        ],
-        "sprints": [
-            {"number": 1, "goal": "Mandate creation happy path against the NPCI sandbox.", "story_ids": ["US-01", "US-02"], "points": 13,
-             "risks": ["NPCI sandbox access must be provisioned in week 1."]},
-            {"number": 2, "goal": "Mandate management and pre-debit notification.", "story_ids": ["US-03", "US-04"], "points": 13, "risks": []},
-            {"number": 3, "goal": "Execution, retry and the compliance audit trail.", "story_ids": ["US-05", "US-06"], "points": 18,
-             "risks": ["Retry-cap decision must be ratified before sprint 3 planning."]},
-        ],
-        "velocity_assumption": 15,
-        "estimation_notes": "Fibonacci story points; velocity of 15/sprint assumed from the Payments squad's trailing three-sprint average. US-05 carries integration risk with the NPCI switch and is deliberately sized at 13.",
+        "document_type": doc_type,
+        "title": f"{titles[doc_type]} — {project}",
+        "sections": sections,
+        "traceability": [{"requirement_id": r["id"],
+                          "section": "5. Business Requirements" if doc_type == "BRD"
+                                     else f"FR-{i + 1:02d}" if doc_type == "FRD" else "2. Overall Description"}
+                         for i, r in enumerate(reqs)],
     }
 
 
-_CANNED: dict[str, Any] = {
+def _joined(items: list[str]) -> str:
+    return "\n".join(f"- {i}" for i in items)
+
+
+def _user_stories(prompt: str) -> dict[str, Any]:
+    reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
+    points = [3, 5, 8, 13]
+    stories = []
+    for i, r in enumerate(reqs, 1):
+        actor = (r.get("actors") or ["user"])[0].lower()
+        stories.append({
+            "id": f"US-{i:02d}",
+            "as_a": actor,
+            "i_want": r["title"][0].lower() + r["title"][1:],
+            "so_that": "the business outcome described in the requirement is achieved",
+            "requirement_ids": [r["id"]],
+            "story_points": points[_h(r["id"], len(points))],
+            "acceptance_criteria": [
+                f"GIVEN the preconditions in {r['id']} WHEN the actor performs the action "
+                f"THEN the system behaves as stated: {r['statement'][:110]}",
+                f"GIVEN an invalid input WHEN the action is attempted THEN it is rejected with a "
+                f"customer-safe message and nothing is committed",
+            ] + ([f"GIVEN the open question '{r['open_question']}' THEN this story is blocked until it is answered"]
+                 if r.get("open_question") else []),
+        })
+    return {"stories": stories}
+
+
+def _api_requirements(prompt: str) -> dict[str, Any]:
+    reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
+    project = _project(prompt)
+    slug = re.sub(r"[^a-z]+", "-", project.lower()).strip("-")[:24] or "resource"
+    verbs = ["POST", "GET", "PATCH", "DELETE"]
+    endpoints = []
+    for i, r in enumerate(reqs[:6]):
+        method = verbs[i % len(verbs)]
+        endpoints.append({
+            "method": method,
+            "path": f"/v1/{slug}/{re.sub(r'[^a-z]+', '-', r['title'].lower()).strip('-')[:22]}",
+            "purpose": r["title"],
+            "auth": "OAuth2 + step-up authentication" if r["priority"] == "MUST" else "OAuth2",
+            "request_schema": "{ …fields derived from the requirement, idempotencyKey }",
+            "response_schema": "{ id, status, …}",
+            "errors": ["400 VALIDATION_FAILED", "401 UNAUTHORIZED", "409 ILLEGAL_STATE", "502 UPSTREAM_UNAVAILABLE"],
+            "sla_ms": 2500 if method != "GET" else 800,
+            "idempotent": method != "POST",
+            "requirement_ids": [r["id"]],
+        })
+    return {
+        "endpoints": endpoints or [{
+            "method": "GET", "path": f"/v1/{slug}", "purpose": "Placeholder — no requirement to derive from",
+            "auth": "OAuth2", "request_schema": "{}", "response_schema": "{}",
+            "errors": ["401 UNAUTHORIZED"], "sla_ms": 800, "idempotent": True, "requirement_ids": [],
+        }],
+        "conventions": "REST/JSON, camelCase, RFC 7807 problem+json errors, mandatory Idempotency-Key on "
+                       "mutating calls, X-Correlation-Id propagated end to end, path versioning.",
+    }
+
+
+def _nfr(prompt: str) -> dict[str, Any]:
+    reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
+    stated = [r for r in reqs if r["category"] in ("NON_FUNCTIONAL", "COMPLIANCE", "DATA")]
+
+    nfrs = [{
+        "id": f"NFR-{i:02d}",
+        "category": "Compliance" if r["category"] == "COMPLIANCE" else
+                    "Data Residency" if r["category"] == "DATA" else "Performance",
+        "requirement": r["statement"],
+        "measurement": "Evidenced in audit; monitored continuously against the stated threshold.",
+        "requirement_ids": [r["id"]],
+    } for i, r in enumerate(stated, 1)]
+
+    # Bank-standard NFRs the evidence rarely states but every bank system needs. Marked as such —
+    # they are proposed, not extracted, and a reviewer should know the difference.
+    baseline = [
+        ("Availability", "99.95% monthly availability for customer-facing endpoints, with graceful "
+                         "degradation when a downstream dependency is unavailable.",
+         "SLO with an error-budget policy."),
+        ("Security", "PII encrypted at rest (AES-256, HSM-backed) and in transit (TLS 1.3). No PII in "
+                     "application logs.", "Annual VAPT; automated log scanning in CI."),
+        ("Observability", "Distributed tracing end to end with a correlation id; alerting on SLA breach "
+                          "within 5 minutes.", "Trace completeness ≥99%; alert MTTA ≤5 min."),
+        ("Accessibility", "WCAG 2.1 AA for all customer-facing screens.",
+         "Automated axe scan plus a manual assistive-technology pass per release."),
+        ("Data Residency", "All customer data stored and processed within India (RBI data localisation).",
+         "Infrastructure attestation; region-pinned resources only."),
+    ]
+    for j, (cat, req, meas) in enumerate(baseline, len(nfrs) + 1):
+        nfrs.append({
+            "id": f"NFR-{j:02d}", "category": cat,
+            "requirement": f"[PROPOSED — not stated in the evidence] {req}",
+            "measurement": meas, "requirement_ids": [],
+        })
+    return {"nfrs": nfrs}
+
+
+def _wireframe(prompt: str) -> dict[str, Any]:
+    reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
+    project = _project(prompt)
+    screens = []
+    for r in reqs[:5]:
+        screens.append({
+            "name": r["title"][:40],
+            "purpose": r["statement"][:140],
+            "components": [
+                {"type": "AppBar", "label": r["title"][:28], "props": {}},
+                {"type": "Form", "label": "Inputs derived from the requirement", "props": {"validation": "inline"}},
+                {"type": "PrimaryButton", "label": "Confirm", "props": {}},
+                {"type": "InlineAlert", "label": "Error and empty states",
+                 "props": {"visible_when": "validation fails or no data"}},
+            ],
+            "requirement_ids": [r["id"]],
+        })
+    if not screens:
+        screens = [{"name": "Placeholder", "purpose": "No requirement available to derive a screen from.",
+                    "components": [{"type": "EmptyState", "label": "No requirements", "props": {}}],
+                    "requirement_ids": []}]
+    return {
+        "screens": screens,
+        "design_system": "HDFC design system — Navy #004C8F primary, 8pt grid, Inter typeface",
+        "flow": " → ".join(s["name"] for s in screens),
+        "notes": f"Low-fidelity greybox screens derived from the extracted requirements for {project}. "
+                 "Visual design applies the bank design system in a later cycle.",
+    }
+
+
+def _sprint_plan(prompt: str) -> dict[str, Any]:
+    stories = _parse_json_from_prompt(prompt, "stories").get("stories", [])
+    velocity = 15
+    if m := re.search(r"Velocity assumption:\s*(\d+)", prompt):
+        velocity = int(m.group(1))
+
+    features = [{"id": f"FEAT-{i:02d}", "name": s["i_want"][:40].title(), "story_ids": [s["id"]]}
+                for i, s in enumerate(stories, 1)]
+    epics = [{
+        "id": "EPIC-01", "name": f"{_project(prompt)} — Core Capability",
+        "goal": "Deliver the approved requirements for this release.",
+        "features": features or [{"id": "FEAT-01", "name": "Placeholder", "story_ids": []}],
+    }]
+
+    sprints, current, points, n = [], [], 0, 1
+    for s in stories:
+        p = s.get("story_points", 5)
+        if points + p > velocity and current:
+            sprints.append({"number": n, "goal": f"Deliver {len(current)} stories.",
+                            "story_ids": current, "points": points, "risks": []})
+            n, current, points = n + 1, [], 0
+        current.append(s["id"])
+        points += p
+    if current:
+        sprints.append({"number": n, "goal": f"Deliver {len(current)} stories.",
+                        "story_ids": current, "points": points,
+                        "risks": ["Stories blocked by an unresolved open question cannot start."]})
+
+    return {
+        "epics": epics,
+        "sprints": sprints or [{"number": 1, "goal": "Nothing to plan — no approved stories.",
+                                "story_ids": [], "points": 0, "risks": []}],
+        "velocity_assumption": velocity,
+        "estimation_notes": "Points assigned deterministically in mock mode. With Gemini live, sizing "
+                            "reflects integration risk and dependency depth.",
+    }
+
+
+# ────────────────────────────── entry points ──────────────────────────────────
+_DERIVERS = {
     "requirement_gathering": _requirements,
     "concept_note": _concept_note,
     "wireframe": _wireframe,
-    "brd": _brd,
-    "frd": _frd,
-    "srs": _srs,
+    "brd": lambda p: _document(p, "BRD"),
+    "frd": lambda p: _document(p, "FRD"),
+    "srs": lambda p: _document(p, "SRS"),
     "user_stories": _user_stories,
     "api_requirements": _api_requirements,
     "nfr": _nfr,
     "sprint_plan": _sprint_plan,
 }
 
-
-# ────────────────────────────── entry points ──────────────────────────────────
-FEEDBACK_RE = __import__("re").compile(
-    r"REVIEWER FEEDBACK.*?---\n(.*?)--- END REVIEWER FEEDBACK", __import__("re").S
-)
+FEEDBACK_RE = re.compile(r"REVIEWER FEEDBACK.*?---\n(.*?)--- END REVIEWER FEEDBACK", re.S)
 
 
 def _feedback(prompt: str) -> list[str]:
@@ -439,38 +659,39 @@ def _feedback(prompt: str) -> list[str]:
 
 
 def _apply_feedback(task: str, payload: dict, fbs: list[str]) -> dict:
-    """Make a revision actually differ from the round it replaces.
+    """Make a revision genuinely differ from the round it replaces.
 
-    In live mode Gemini does this for us. In mock mode we have to fold the reviewer's comments
-    into the payload explicitly — otherwise the regenerated artifact is byte-identical, the
-    content-addressed versioner (correctly) refuses to create a v2, and the revision loop looks
-    broken when in fact it is working perfectly.
+    Live, Gemini does this for us. In mock mode we fold the comments in explicitly — otherwise the
+    regenerated artifact is byte-identical, the content-addressed versioner (correctly) refuses to
+    create a v2, and the revision loop looks broken when it is working perfectly.
     """
     if not fbs:
         return payload
     if task == "concept_note":
-        for i, f in enumerate(fbs, start=len(payload.get("business_rules", [])) + 1):
-            payload.setdefault("business_rules", []).append({"id": f"BRULE-{i:02d}", "rule": f"[Revised per review] {f}"})
+        start = len(payload.get("business_rules", [])) + 1
+        for i, f in enumerate(fbs, start):
+            payload.setdefault("business_rules", []).append(
+                {"id": f"BRULE-{i:02d}", "rule": f"[Revised per review] {f}"})
         payload.setdefault("assumptions", []).append(
-            "Revision incorporates reviewer comments raised at the concept-note gate."
-        )
+            "This revision incorporates reviewer comments raised at the concept-note gate.")
     elif task in ("brd", "frd", "srs"):
         payload.setdefault("sections", []).append(
-            {"heading": "Appendix — Review Revisions",
-             "body": "\n".join(f"- {f}" for f in fbs)}
-        )
+            {"heading": "Appendix — Review Revisions", "body": "\n".join(f"- {f}" for f in fbs)})
     elif task == "requirement_gathering":
         payload.setdefault("gaps", []).extend(f"Reviewer-raised: {f}" for f in fbs)
     elif task == "sprint_plan":
-        payload.setdefault("estimation_notes", "")
-        payload["estimation_notes"] += " Re-planned per reviewer comments: " + "; ".join(fbs)
+        payload["estimation_notes"] = payload.get("estimation_notes", "") + \
+            " Re-planned per reviewer comments: " + "; ".join(fbs)
     return payload
 
 
 def mock_json(*, task: str, prompt: str, schema: dict) -> dict:
-    fn = _CANNED.get(task)
+    fn = _DERIVERS.get(task)
     if fn:
-        return _apply_feedback(task, fn(), _feedback(prompt))
+        try:
+            return _apply_feedback(task, fn(prompt), _feedback(prompt))
+        except Exception:  # a broken heuristic must not fail the run
+            pass
     return _from_schema(schema, task, prompt)
 
 
@@ -478,20 +699,46 @@ def mock_text(*, task: str, prompt: str) -> str:
     if task == "copilot":
         return _mock_copilot(prompt)
     if task == "change_summary":
-        return "Regenerated after reviewer comments: business rules tightened, retry-cap conflict annotated, traceability refreshed."
+        return "Regenerated after reviewer comments."
     if task == "approval_email":
         return "Please review the attached artifact and approve or request changes."
     return f"[mock:{task}] {prompt[:160]}"
 
 
+def _mock_copilot(prompt: str) -> str:
+    """Offline copilot: answer from the blocks that were actually retrieved."""
+    q = ""
+    if m := re.search(r"BUSINESS ANALYST'S QUESTION\n(.*?)\n\nAnswer", prompt, re.S):
+        q = m.group(1).strip()
+
+    blocks = re.findall(
+        r"\[(\d+)\] \(ns=([a-z_]+), score=([\d.-]+)\)\n(.*?)(?=\n\[\d+\] \(|\n--- END)", prompt, re.S,
+    )
+    if not blocks:
+        return (
+            f'I cannot answer "{q}" from this project\'s evidence — nothing relevant was retrieved from '
+            "its memory.\n\nTo answer it I would need the discovery notes, the sponsor's email thread, or "
+            "a transcript covering this topic. Upload them under Knowledge Ingestion and ask me again."
+            "\n\n_(Mock mode: retrieval is real, the phrasing is deterministic. Set GOOGLE_API_KEY and "
+            "MOCK_MODE=false for Gemini 2.5 Pro reasoning.)_"
+        )
+
+    lines = [f"Based on {len(blocks)} passage(s) retrieved from this project's memory:"]
+    for n, ns, score, body in blocks[:3]:
+        snippet = " ".join(body.split())[:230]
+        lines.append(f"**[{n}]** _{ns}_ (relevance {float(score):.2f}) — {snippet}…")
+    lines.append("That is what the evidence supports. Anything beyond it would be speculation, and this "
+                 "platform does not let an agent speculate into a BRD.")
+    lines.append("_(Mock mode: retrieval is real, the phrasing is deterministic. Set GOOGLE_API_KEY and "
+                 "MOCK_MODE=false for Gemini 2.5 Pro reasoning.)_")
+    return "\n\n".join(lines)
+
+
 def _from_schema(schema: dict, task: str, prompt: str) -> Any:
-    """Generic schema-conformant filler — the safety net for un-canned tasks."""
+    """Schema-conformant filler — the safety net when a heuristic has nothing to work with."""
     t = schema.get("type", "object")
     if t == "object":
-        out = {}
-        for key, sub in (schema.get("properties") or {}).items():
-            out[key] = _from_schema(sub, task, prompt + key)
-        return out
+        return {k: _from_schema(v, task, prompt + k) for k, v in (schema.get("properties") or {}).items()}
     if t == "array":
         item = schema.get("items", {"type": "string"})
         return [_from_schema(item, task, prompt + str(i)) for i in range(2)]
@@ -503,45 +750,4 @@ def _from_schema(schema: dict, task: str, prompt: str) -> Any:
         return _h(prompt, 2) == 1
     if enum := schema.get("enum"):
         return enum[_h(prompt, len(enum))]
-    return f"[mock:{task}] generated value"
-
-
-def _mock_copilot(prompt: str) -> str:
-    """Offline copilot: answer from the blocks that were actually retrieved and passed in.
-
-    It quotes the real retrieved context rather than inventing prose, so the demo shows honest
-    grounding behaviour — including the "I cannot answer from the evidence" path when retrieval
-    comes back empty.
-    """
-    import re as _re
-
-    q = ""
-    if m := _re.search(r"BUSINESS ANALYST'S QUESTION\n(.*?)\n\nAnswer", prompt, _re.S):
-        q = m.group(1).strip()
-
-    blocks = _re.findall(
-        r"\[(\d+)\] \(ns=([a-z_]+), score=([\d.-]+)\)\n(.*?)(?=\n\[\d+\] \(|\n--- END)",
-        prompt, _re.S,
-    )
-    if not blocks:
-        return (
-            f'I cannot answer "{q}" from this project\'s evidence — nothing relevant was retrieved '
-            "from its memory.\n\nTo answer it I would need the discovery notes, the sponsor's email "
-            "thread, or a transcript covering this topic. Upload them under Knowledge Ingestion and "
-            "ask me again.\n\n_(Mock mode: retrieval is real, the phrasing is deterministic. Set "
-            "GOOGLE_API_KEY and MOCK_MODE=false for Gemini 2.5 Pro reasoning.)_"
-        )
-
-    lines = [f"Based on {len(blocks)} passage(s) retrieved from this project's memory:"]
-    for n, ns, score, body in blocks[:3]:
-        snippet = " ".join(body.split())[:230]
-        lines.append(f"**[{n}]** _{ns}_ (relevance {float(score):.2f}) — {snippet}…")
-    lines.append(
-        "That is what the evidence supports. Anything beyond it would be speculation, and this "
-        "platform does not let an agent speculate into a BRD."
-    )
-    lines.append(
-        "_(Mock mode: retrieval is real, the phrasing is deterministic. Set GOOGLE_API_KEY and "
-        "MOCK_MODE=false for Gemini 2.5 Pro reasoning.)_"
-    )
-    return "\n\n".join(lines)
+    return f"[mock:{task}] no evidence available to derive this field"
