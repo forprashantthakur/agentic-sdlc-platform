@@ -38,7 +38,7 @@ function Shell() {
       <Routes>
         <Route path="/" element={<Dashboard setProject={setProject} onSeed={() => setLibrary(true)} />} />
         <Route path="/new" element={<NewBrd project={project} setProject={setProject} run={run} setRun={setRun} />} />
-        <Route path="/projects" element={<Projects setProject={setProject} />} />
+        <Route path="/projects" element={<Projects setProject={setProject} onSeed={() => setLibrary(true)} />} />
         <Route path="/knowledge" element={<Knowledge project={project} />} />
         <Route path="/agents" element={<Agents />} />
         <Route path="/review" element={<ReviewCenter setProject={setProject} />} />

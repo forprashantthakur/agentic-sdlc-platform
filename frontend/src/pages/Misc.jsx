@@ -11,7 +11,7 @@ const STATUS_TONE = {
   FAILED: 'danger', REJECTED: 'danger', DRAFT: 'default',
 }
 
-export function Projects({ setProject }) {
+export function Projects({ setProject, onSeed }) {
   const nav = useNavigate()
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
@@ -27,15 +27,19 @@ export function Projects({ setProject }) {
           <h1 className="text-xl font-semibold tracking-tight">My Projects</h1>
           <p className="text-[13px] text-muted mt-1">{rows.length} project{rows.length === 1 ? '' : 's'}</p>
         </div>
-        <div className="relative w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className="pl-9" />
+        <div className="flex items-center gap-2">
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className="pl-9" />
+          </div>
+          <Button variant="secondary" onClick={onSeed}>Demo library</Button>
         </div>
       </div>
 
       {filtered.length === 0 ? (
         <Empty icon={FolderKanban} title="No projects"
-          hint="Start a new BRD from the left nav, or load the demo library from the Dashboard — five banking projects with realistic, contradictory evidence." />
+          hint="Start a new BRD from the left nav, or open the demo library — five banking projects with realistic, contradictory evidence."
+          action={<Button onClick={onSeed}>Open demo library</Button>} />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {filtered.map((p) => (

@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import {
-  Activity, Bot, CheckCircle2, Clock, FilePlus2, FileStack, FolderKanban, Layers, ShieldQuestion, Sparkles, TrendingUp,
+  Activity, Bot, CheckCircle2, Clock, FilePlus2, FileStack, FolderKanban, Layers, Library,
+  ShieldQuestion, Sparkles, TrendingUp,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -40,7 +41,9 @@ export default function Dashboard({ setProject, onSeed }) {
           <p className="text-[13px] text-muted mt-1">Requirement gathering and documentation, across the bank.</p>
         </div>
         <div className="flex gap-2">
-          {projects.length === 0 && <Button variant="secondary" onClick={onSeed}>Load demo project</Button>}
+          <Button variant="secondary" onClick={onSeed}>
+            <Library className="h-3.5 w-3.5" /> Demo library
+          </Button>
           <Button onClick={() => nav('/new')}><FilePlus2 className="h-3.5 w-3.5" /> New BRD</Button>
         </div>
       </div>
@@ -78,8 +81,8 @@ export default function Dashboard({ setProject, onSeed }) {
           <CardBody className={projects.length ? 'p-0' : ''}>
             {projects.length === 0 ? (
               <Empty icon={FolderKanban} title="No projects yet"
-                hint="Start a new BRD, or load the demo project to watch all six agents run end to end."
-                action={<Button onClick={onSeed}>Load demo project</Button>} />
+                hint="Start a new BRD, or open the demo library — five banking projects whose sources deliberately contradict each other."
+                action={<Button onClick={onSeed}>Open demo library</Button>} />
             ) : (
               <ul className="divide-y divide-line">
                 {projects.slice(0, 6).map((p) => (
