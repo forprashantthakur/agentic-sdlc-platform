@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     gemini_flash_model: str = "gemini-2.5-flash"
     gemini_embed_model: str = "text-embedding-004"
 
+    # Gemini 2.5 Pro can emit long documents. Agent 4's SRS is the biggest single generation;
+    # too low a budget truncates it into unparseable JSON.
+    max_output_tokens: int = 32768
+
     use_vertex: bool = False
     vertex_project: str = ""
     vertex_location: str = "asia-south1"

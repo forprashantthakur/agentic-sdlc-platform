@@ -242,3 +242,56 @@ it came from.
 connectors) have no backend. They render — the flow reads end-to-end — but clicking them says
 *"preview — not wired"* rather than failing silently. In a governance review, a button that lies
 costs more credibility than a button that is honestly absent.
+
+
+---
+
+## Going live on Gemini 2.5 Pro
+
+All the thinking agents already call Gemini — nothing is hard-coded to mocks. Two variables:
+
+```bash
+MOCK_MODE=false
+GOOGLE_API_KEY=<your AI Studio key>
+```
+
+Then **verify before you run a whole job**:
+
+```
+GET /api/integrations/llm/selftest    # one structured call + one embedding
+GET /api/integrations/llm/agents      # which agent uses what, and why
+```
+
+`selftest` returns `"ready": true` when structured output and embeddings both work. A failure
+there costs a second. The same failure discovered inside Agent 4 costs a full run and a confusing
+traceback.
+
+### Agent 5 has no LLM, on purpose
+
+| Agent | Model | Temp | Why |
+|---|---|---|---|
+| 1 · Requirement Gathering | gemini-2.5-pro | 0.1 | Extraction, not creativity — stay close to the evidence |
+| 2 · Concept Note | gemini-2.5-pro | 0.25 | Framing and synthesis |
+| 3 · Wireframe | gemini-2.5-pro | 0.35 | Screen design earns the widest latitude here |
+| 4 · Requirement Documents | gemini-2.5-pro | 0.2 | Six constrained generations; BRD/FRD/SRS run concurrently |
+| **5 · Approval** | **none** | — | **It is the approval gate.** A gate with a language model in it is a gate that a prompt-injected email in the evidence base could argue its way through. It renders the packet, sends the mail, records the human's decision, seals the version. It does not think. |
+| 6 · Sprint | gemini-2.5-pro | 0.25 | Organises approved stories — must not rewrite them, or traceability to the approved BRD breaks |
+
+### What was wrong with the live path
+
+It had never executed, and it would have failed:
+
+- **`response_schema` vs `response_json_schema`.** A raw JSON Schema dict belongs on
+  `response_json_schema`. `response_schema` expects a Pydantic model or a genai `Schema`; it
+  *coerces* a dict, silently dropping constraints it cannot map. The schemas are the guardrail —
+  a silently degraded one is worse than none.
+- **The SDK pin was `google-genai==0.5.0`** (Dec 2024). Now `>=1.20,<3`.
+- **A truncated response is still an HTTP 200.** If Gemini hits `max_output_tokens` mid-object you
+  get JSON that won't parse — or, worse, parses with half the requirements missing. The client now
+  checks `finish_reason` and raises `TruncatedResponse` instead of committing a truncated BRD.
+- **Blocked responses** (`SAFETY`, `RECITATION`) also return 200 with empty text. Now caught and named.
+- **Embedding dimensions.** The pgvector column is `VECTOR(768)`, fixed at table creation. Swapping
+  the embedding model would have failed deep inside an INSERT with an opaque error. Checked once,
+  where the message can say what actually went wrong.
+
+Token usage (prompt / output / thinking) is logged per call, so cost is attributable per agent.
