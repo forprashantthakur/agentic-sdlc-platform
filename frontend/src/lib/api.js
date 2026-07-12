@@ -2,37 +2,58 @@ const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 async function req(path, opts = {}) {
   const r = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' },
     ...opts,
   })
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+  if (!r.ok) {
+    let detail = await r.text()
+    try { detail = JSON.parse(detail).detail ?? detail } catch { /* plain text */ }
+    throw new Error(detail || `${r.status} ${r.statusText}`)
+  }
   return r.status === 204 ? null : r.json()
 }
 
+export const API_BASE = BASE
+
 export const api = {
   health: () => req('/health'),
+  stats: () => req('/api/dashboard/stats'),
+  queue: () => req('/api/dashboard/queue'),
 
   projects: () => req('/api/projects'),
+  project: (id) => req(`/api/projects/${id}`),
+  createProject: (b) => req('/api/projects', { method: 'POST', body: JSON.stringify(b) }),
+  updateContext: (id, ctx) => req(`/api/projects/${id}/context`, { method: 'PATCH', body: JSON.stringify(ctx) }),
   seedProject: () => req('/api/projects/seed', { method: 'POST' }),
-  sources: (pid) => req(`/api/projects/${pid}/sources`),
 
-  startRun: (body) => req('/api/runs', { method: 'POST', body: JSON.stringify(body) }),
-  runs: (pid) => req(`/api/runs?project_id=${pid}`),
-  run: (id) => req(`/api/runs/${id}`),
+  sources: (pid) => req(`/api/projects/${pid}/sources`),
+  addSource: (pid, b) => req(`/api/projects/${pid}/sources`, { method: 'POST', body: JSON.stringify(b) }),
+  deleteSource: (pid, sid) => req(`/api/projects/${pid}/sources/${sid}`, { method: 'DELETE' }),
+  upload: (pid, files) => {
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f)
+    return req(`/api/projects/${pid}/upload`, { method: 'POST', body: fd })
+  },
+
+  startRun: (b) => req('/api/runs', { method: 'POST', body: JSON.stringify(b) }),
+  runs: (pid) => req(`/api/runs${pid ? `?project_id=${pid}` : ''}`),
   events: (id, after = 0) => req(`/api/runs/${id}/events?after=${after}`),
-  history: (id) => req(`/api/runs/${id}/history`),
 
   artifacts: (pid) => req(`/api/artifacts?project_id=${pid}`),
+  version: (vid) => req(`/api/artifacts/versions/${vid}`),
+  diff: (vid) => req(`/api/artifacts/versions/${vid}/diff`),
   exportUrl: (vid, fmt) => `${BASE}/api/artifacts/versions/${vid}/export?format=${fmt}`,
   packUrl: (pid, fmt, approvedOnly = false) =>
     `${BASE}/api/artifacts/pack?project_id=${pid}&format=${fmt}&approved_only=${approvedOnly}`,
-  version: (vid) => req(`/api/artifacts/versions/${vid}`),
-  diff: (vid) => req(`/api/artifacts/versions/${vid}/diff`),
 
-  approvals: (pid) => req(`/api/approvals?project_id=${pid}`),
-  decide: (id, body) => req(`/api/approvals/${id}/decide`, { method: 'POST', body: JSON.stringify(body) }),
+  approvals: (pid) => req(`/api/approvals${pid ? `?project_id=${pid}` : ''}`),
+  decide: (id, b) => req(`/api/approvals/${id}/decide`, { method: 'POST', body: JSON.stringify(b) }),
 
-  // Server-sent events: the run timeline streams instead of polling.
+  memorySearch: (pid, q, k = 8) =>
+    req(`/api/memory/search?project_id=${pid}&q=${encodeURIComponent(q)}&k=${k}`),
+  copilotChat: (b) => req('/api/copilot/chat', { method: 'POST', body: JSON.stringify(b) }),
+  copilotInsights: (pid) => req(`/api/copilot/insights?project_id=${pid}`),
+
   stream: (runId, onEvent) => {
     const es = new EventSource(`${BASE}/api/runs/${runId}/stream`)
     es.onmessage = (e) => { try { onEvent(JSON.parse(e.data)) } catch { /* keep-alive */ } }

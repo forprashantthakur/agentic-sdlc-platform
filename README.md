@@ -211,3 +211,34 @@ truth, three outputs.
 PDF uses WeasyPrint (real tables, repeating headers across page breaks, page numbers), which
 links against pango/cairo — those system libraries are installed in `backend/Dockerfile`.
 Without them the import succeeds at build time and fails on the first PDF request.
+
+
+---
+
+## The console
+
+A six-step guided flow — **Business Context → Knowledge Ingestion → Requirement Discovery →
+AI Analysis → Review → Generate BRD** — with a persistent, grounded **AI Copilot** on the right,
+a nine-item left nav (Dashboard, New BRD, Projects, Knowledge Sources, AI Agents, Review Center,
+Documents, Integrations, Settings) and dark mode throughout. Tailwind + a hand-rolled
+shadcn-equivalent design system; no Radix, no Next.js — the deployed Vite SPA stays deployed.
+
+**Business Context** captures the brief (sponsor, owner, priority, objective, problem statement,
+KPIs, business value, timeline, budget, regulatory scope) and **indexes it into project memory**,
+so the copilot and the agents can cite what the business actually asked for.
+
+**Knowledge Ingestion** does real extraction: PDF, Word, Excel, PowerPoint, email and transcripts
+are parsed, chunked and embedded. Images and audio are **accepted and honestly marked**
+`OCR_PENDING` / `TRANSCRIPTION_PENDING` — an agent that cannot read a document must not pretend it
+did. Connector cards state plainly whether an adapter exists behind them.
+
+**The AI Copilot is grounded, not decorative.** Every answer retrieves from that project's memory
+first; the model is instructed to answer only from it and to say so when the evidence doesn't
+cover the question. Citations come back with each response. An ungrounded copilot in a
+requirements tool invents a requirement, a BA pastes it into the BRD, and nobody can trace where
+it came from.
+
+**On the unbuilt.** Some actions (Publish, Generate test cases, Generate FSD, 9 of the 13
+connectors) have no backend. They render — the flow reads end-to-end — but clicking them says
+*"preview — not wired"* rather than failing silently. In a governance review, a button that lies
+costs more credibility than a button that is honestly absent.

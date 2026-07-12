@@ -475,6 +475,8 @@ def mock_json(*, task: str, prompt: str, schema: dict) -> dict:
 
 
 def mock_text(*, task: str, prompt: str) -> str:
+    if task == "copilot":
+        return _mock_copilot(prompt)
     if task == "change_summary":
         return "Regenerated after reviewer comments: business rules tightened, retry-cap conflict annotated, traceability refreshed."
     if task == "approval_email":
@@ -502,3 +504,44 @@ def _from_schema(schema: dict, task: str, prompt: str) -> Any:
     if enum := schema.get("enum"):
         return enum[_h(prompt, len(enum))]
     return f"[mock:{task}] generated value"
+
+
+def _mock_copilot(prompt: str) -> str:
+    """Offline copilot: answer from the blocks that were actually retrieved and passed in.
+
+    It quotes the real retrieved context rather than inventing prose, so the demo shows honest
+    grounding behaviour — including the "I cannot answer from the evidence" path when retrieval
+    comes back empty.
+    """
+    import re as _re
+
+    q = ""
+    if m := _re.search(r"BUSINESS ANALYST'S QUESTION\n(.*?)\n\nAnswer", prompt, _re.S):
+        q = m.group(1).strip()
+
+    blocks = _re.findall(
+        r"\[(\d+)\] \(ns=([a-z_]+), score=([\d.-]+)\)\n(.*?)(?=\n\[\d+\] \(|\n--- END)",
+        prompt, _re.S,
+    )
+    if not blocks:
+        return (
+            f'I cannot answer "{q}" from this project\'s evidence — nothing relevant was retrieved '
+            "from its memory.\n\nTo answer it I would need the discovery notes, the sponsor's email "
+            "thread, or a transcript covering this topic. Upload them under Knowledge Ingestion and "
+            "ask me again.\n\n_(Mock mode: retrieval is real, the phrasing is deterministic. Set "
+            "GOOGLE_API_KEY and MOCK_MODE=false for Gemini 2.5 Pro reasoning.)_"
+        )
+
+    lines = [f"Based on {len(blocks)} passage(s) retrieved from this project's memory:"]
+    for n, ns, score, body in blocks[:3]:
+        snippet = " ".join(body.split())[:230]
+        lines.append(f"**[{n}]** _{ns}_ (relevance {float(score):.2f}) — {snippet}…")
+    lines.append(
+        "That is what the evidence supports. Anything beyond it would be speculation, and this "
+        "platform does not let an agent speculate into a BRD."
+    )
+    lines.append(
+        "_(Mock mode: retrieval is real, the phrasing is deterministic. Set GOOGLE_API_KEY and "
+        "MOCK_MODE=false for Gemini 2.5 Pro reasoning.)_"
+    )
+    return "\n\n".join(lines)

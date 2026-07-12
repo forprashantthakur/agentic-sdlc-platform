@@ -84,6 +84,10 @@ class Project(Base):
     business_unit: Mapped[str] = mapped_column(String(120), default="Retail Banking")
     description: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(200), default="system")
+    # Structured business context captured at intake: sponsor, owner, priority, objectives,
+    # problem statement, KPIs, business value, timeline, budget. JSON rather than 15 columns
+    # because it is a form payload, not a query surface — and it evolves with the form.
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     sources: Mapped[list[Source]] = relationship(back_populates="project", cascade="all, delete-orphan")

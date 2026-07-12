@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: 247 249 252; --surface: 255 255 255; --line: 226 232 240;
+    --ink: 15 32 63; --muted: 100 116 139;
+    --brand: 0 76 143; --brand-fg: 255 255 255; --brand-soft: 232 240 250; --brand-deep: 0 46 86;
+    --accent: 237 35 42; --success: 0 135 90; --warning: 180 83 9; --danger: 220 38 38;
+  }
+  .dark {
+    --bg: 10 15 26; --surface: 17 24 39; --line: 39 51 73;
+    --ink: 226 234 247; --muted: 141 158 182;
+    --brand: 82 152 224; --brand-fg: 8 14 25; --brand-soft: 25 42 66; --brand-deep: 148 191 240;
+    --success: 52 199 145; --warning: 245 176 65; --danger: 248 113 113;
+  }
+  * { @apply border-line; }
+  body { @apply bg-bg text-ink antialiased; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { @apply bg-line rounded-full; border: 3px solid transparent; background-clip: content-box; }
+  :focus-visible { @apply outline-none ring-2 ring-brand/60 ring-offset-2 ring-offset-bg rounded-lg; }
+}
+
+@layer components {
+  .prose-doc { @apply text-[13.5px] leading-relaxed text-ink; }
+  .prose-doc h1 { @apply text-xl font-semibold text-brand-deep mt-0 mb-3; }
+  .prose-doc h2 { @apply text-[15px] font-semibold text-brand-deep mt-7 mb-2 scroll-mt-24; }
+  .prose-doc h3 { @apply text-[13.5px] font-semibold mt-5 mb-1.5; }
+  .prose-doc p { @apply my-2; }
+  .prose-doc ul { @apply list-disc pl-5 my-2 space-y-1; }
+  .prose-doc ol { @apply list-decimal pl-5 my-2 space-y-1; }
+  .prose-doc table { @apply w-full border-collapse my-3 text-[12.5px]; }
+  .prose-doc th { @apply bg-brand text-brand-fg text-left font-semibold px-2.5 py-2 border border-brand; }
+  .prose-doc td { @apply border border-line px-2.5 py-2 align-top; }
+  .prose-doc code { @apply font-mono text-[11.5px] bg-bg px-1.5 py-0.5 rounded border border-line; }
+  .prose-doc a { @apply text-brand underline underline-offset-2; }
+  .prose-doc strong { @apply font-semibold; }
+}

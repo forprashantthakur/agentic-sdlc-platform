@@ -15,10 +15,29 @@ class SourceIn(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class BusinessContext(BaseModel):
+    """Screen 1 — the structured intake that feeds Agent 1."""
+
+    business_owner: str = ""
+    project_sponsor: str = ""
+    priority: str = "Medium"
+    business_objective: str = ""
+    problem_statement: str = ""
+    current_challenges: str = ""
+    desired_outcome: str = ""
+    expected_benefits: str = ""
+    business_kpis: list[str] = Field(default_factory=list)
+    estimated_business_value: str = ""
+    timeline: str = ""
+    budget: str = ""
+    regulatory_scope: list[str] = Field(default_factory=list)
+
+
 class ProjectIn(BaseModel):
     name: str
     business_unit: str = "Retail Banking"
     description: str = ""
+    context: BusinessContext = Field(default_factory=BusinessContext)
     sources: list[SourceIn] = Field(default_factory=list)
 
 
@@ -27,9 +46,12 @@ class ProjectOut(BaseModel):
     name: str
     business_unit: str
     description: str
+    context: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     source_count: int = 0
     run_count: int = 0
+    artifact_count: int = 0
+    status: str = "DRAFT"
 
     model_config = {"from_attributes": True}
 

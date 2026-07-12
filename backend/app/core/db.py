@@ -24,6 +24,7 @@ IS_POSTGRES = engine.dialect.name == "postgresql"
 # Alembic, and this list should shrink to zero the moment it does.
 _RECONCILE = [
     "ALTER TABLE approvals ALTER COLUMN token TYPE TEXT",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS context JSONB NOT NULL DEFAULT '{}'::jsonb",
 ]
 
 
