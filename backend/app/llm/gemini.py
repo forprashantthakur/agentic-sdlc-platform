@@ -95,10 +95,21 @@ class GeminiClient:
         if not self.live:
             return [_hash_embedding(t, settings.embed_dim) for t in texts]
 
+        from google.genai import types
+
+        # gemini-embedding-001 returns 3072 dims by default. Our pgvector column is VECTOR(768),
+        # fixed when the table was created, so we ask for 768 explicitly (Matryoshka truncation).
+        # Google's guidance: anything below the native 3072 should be re-normalised afterwards —
+        # truncation breaks unit length, and cosine similarity on non-unit vectors quietly skews.
         resp = self._client.models.embed_content(
-            model=settings.gemini_embed_model, contents=texts
+            model=settings.gemini_embed_model,
+            contents=texts,
+            config=types.EmbedContentConfig(
+                output_dimensionality=settings.embed_dim,
+                task_type="RETRIEVAL_DOCUMENT",
+            ),
         )
-        vectors = [list(e.values) for e in resp.embeddings]
+        vectors = [_normalise(list(e.values)) for e in resp.embeddings]
 
         # The pgvector column is VECTOR(embed_dim), fixed at table creation. A model swap that
         # changes dimensionality would fail deep inside an INSERT with an opaque error — so check
@@ -135,7 +146,27 @@ class GeminiClient:
             cfg.response_mime_type = "application/json"
             cfg.response_json_schema = json_schema
 
-        resp = self._client.models.generate_content(model=model, contents=prompt, config=cfg)
+        try:
+            resp = self._client.models.generate_content(model=model, contents=prompt, config=cfg)
+        except Exception as e:
+            msg = str(e)
+            # "limit: 0" is not "you ran out" — it is "this model has no free-tier quota on this
+            # project at all". Those are completely different problems and the raw error does a
+            # poor job of saying so.
+            if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+                if "limit: 0" in msg:
+                    raise RuntimeError(
+                        f"{task}: '{model}' has NO free-tier quota on this API key (limit: 0). "
+                        "This is not a rate limit you can wait out. Either enable billing on the "
+                        "Google Cloud project behind the key, or set GEMINI_MODEL=gemini-2.5-flash, "
+                        "which does have a free tier."
+                    ) from e
+                raise RuntimeError(
+                    f"{task}: rate limited on '{model}'. Free-tier Gemini 2.5 Pro is roughly 5 RPM / "
+                    "100 requests per day — a full six-agent run makes ~10 calls, and Agent 4 fires "
+                    "six of them concurrently. Slow the run down or enable billing."
+                ) from e
+            raise
 
         # A blocked or truncated response is still an HTTP 200. Fail loudly.
         candidate = (resp.candidates or [None])[0]
@@ -197,7 +228,13 @@ class GeminiClient:
             vec = self.embed(["UPI AutoPay mandate"])
             result["embeddings"] = {"ok": True, "model": settings.gemini_embed_model, "dims": len(vec[0])}
         except Exception as e:
-            result["embeddings"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            result["embeddings"] = {
+                "ok": False,
+                "model": settings.gemini_embed_model,
+                "error": f"{type(e).__name__}: {e}",
+                "hint": "If this is a 404, the embedding model name is wrong for the current API "
+                        "version. Set GEMINI_EMBED_MODEL=gemini-embedding-001.",
+            }
 
         result["ready"] = bool(
             result.get("structured_output", {}).get("ok") and result.get("embeddings", {}).get("ok")
@@ -209,6 +246,11 @@ class GeminiClient:
         if not self.live:
             return "mock/deterministic"
         return f"{'vertex' if settings.use_vertex else 'aistudio'}:{settings.gemini_model}"
+
+
+def _normalise(vec: list[float]) -> list[float]:
+    norm = sum(v * v for v in vec) ** 0.5 or 1.0
+    return [v / norm for v in vec]
 
 
 def _hash_embedding(text: str, dim: int) -> list[float]:

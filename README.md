@@ -356,3 +356,47 @@ So MOCK_MODE now proves the *machinery* — retrieval, gates, versioning, tracea
 honestly, on whatever project you point it at. It is not a substitute for the model. For real
 reasoning, set `MOCK_MODE=false` and `GOOGLE_API_KEY`, and verify with
 `GET /api/integrations/llm/selftest`.
+
+
+---
+
+## Turning Gemini on — the two things that will bite you
+
+`GET /api/integrations/llm/selftest` catches both in one second. Run it before anything else.
+
+### 1. `gemini-2.5-pro` may have zero free-tier quota
+
+```
+429 RESOURCE_EXHAUSTED … limit: 0, model: gemini-2.5-pro
+```
+
+**`limit: 0` does not mean "you ran out". It means "you never had any."** 2.5 Pro is paid-only on
+many projects. Two options:
+
+- **Enable billing** on the Google Cloud project behind the key, or
+- **Set `GEMINI_MODEL=gemini-2.5-flash`** — it has a real free tier.
+
+Even *with* free-tier Pro quota (≈5 RPM / 100 requests a day), a full six-agent run makes ~10 calls
+and Agent 4 fires six of them concurrently. You will rate-limit almost immediately.
+
+### 2. `text-embedding-004` is dead
+
+```
+404 NOT_FOUND … not supported for embedContent
+```
+
+Use `GEMINI_EMBED_MODEL=gemini-embedding-001`. It returns 3072 dims by default; the client requests
+768 explicitly (to match the pgvector column) and re-normalises, because Matryoshka truncation
+breaks unit length and cosine similarity on non-unit vectors quietly skews.
+
+### 3. Then re-index — this one is silent if you miss it
+
+```
+POST /api/memory/reindex?project_id=<id>
+```
+
+Mock mode embeds with a deterministic **hash**. Gemini embeds **semantically**. They share a table
+and are mathematically meaningless against each other. A project seeded in mock mode and then
+queried live will retrieve near-random chunks, and the agents will ground requirements in noise —
+**with citations that look perfectly plausible and are wrong.** Re-index every project that existed
+before you flipped the switch, or just delete them and re-seed.

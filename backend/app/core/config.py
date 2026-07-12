@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro"
     gemini_flash_model: str = "gemini-2.5-flash"
-    gemini_embed_model: str = "text-embedding-004"
+    # text-embedding-004 is gone from the current API version (404 on embedContent).
+    gemini_embed_model: str = "gemini-embedding-001"
 
     # Gemini 2.5 Pro can emit long documents. Agent 4's SRS is the biggest single generation;
     # too low a budget truncates it into unparseable JSON.
