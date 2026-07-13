@@ -32,7 +32,24 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from app.core.config import settings
 from app.core.logging import log
+from app.core import progress
 from app.llm.mock import mock_json, mock_text
+
+
+def _report_retry(state) -> None:
+    """Backing off is honest work — say so, on the timeline, where the user is actually looking.
+
+    Defined above the classes on purpose: it is referenced inside a @retry decorator, which is
+    evaluated when the class body is executed, not when the method is called.
+    """
+    wait = f"{state.next_action.sleep:.0f}s" if state.next_action else "?"
+    err = str(state.outcome.exception())[:100] if state.outcome else ""
+    log.warning("llm.retry", attempt=state.attempt_number, sleeping=wait, error=err)
+    progress.emit(
+        f"Model unavailable — backing off {wait} and retrying "
+        f"(attempt {state.attempt_number} of 5). {err}",
+        level="warning",
+    )
 
 
 class TruncatedResponse(RuntimeError):
@@ -149,11 +166,7 @@ class GeminiClient:
         retry=retry_if_exception_type(
             (TransientError, TruncatedResponse, json.JSONDecodeError, ConnectionError)
         ),
-        before_sleep=lambda st: log.warning(
-            "gemini.retry", attempt=st.attempt_number,
-            sleeping=f"{st.next_action.sleep:.0f}s" if st.next_action else "-",
-            error=str(st.outcome.exception())[:120] if st.outcome else "",
-        ),
+        before_sleep=_report_retry,
         reraise=True,
     )
     def _call(
@@ -375,3 +388,4 @@ def reset_client() -> None:
     """Drop the cached client — used after a config change so a key swap takes effect."""
     global _client
     _client = None
+

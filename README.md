@@ -615,3 +615,32 @@ That is not a prompt instruction, and it is why swapping providers is safe.
 The model that actually ran is stamped on every artifact version — so a BRD written by Claude and one
 written by Gemini stay distinguishable months later, which is precisely what a model-risk review asks
 for.
+
+
+---
+
+## Making it fast
+
+A full run on a frontier model is 2–5 minutes. Most of that is Agent 4, which generates six
+documents. Here is where the time actually goes, and what to do about it.
+
+| Setting | Fast demo | Best quality |
+|---|---|---|
+| `GEMINI_MODEL` | `gemini-3.5-flash` | `gemini-3.1-pro-preview` |
+| `GEMINI_CONCURRENCY` | `3` | `3` |
+| `AGENT_MODELS` | *(unset — Flash everywhere)* | `{"agent1_requirements":"anthropic:claude-opus-4-8"}` |
+
+`GEMINI_CONCURRENCY=3` lets Agent 4 write the BRD, FRD and SRS in parallel. It defaults to 1 to
+protect a free-tier quota; on a paid plan that caution costs you a minute per run for nothing.
+
+**The real answer for a live demo: don't run it live.** Run both projects to completion *before* you
+present, then walk the audience through the finished artifacts and do **one** thing live — reject at
+the gate and watch v2 regenerate with the diff. That is the only moment that needs to happen in
+front of them, it takes ~30 seconds, and it is the moment that actually proves the governance model.
+Watching a progress bar for four minutes proves nothing.
+
+**Retries are now visible.** Previously the client would back off — 4s, 8s, 16s, 32s — in silence,
+and the console showed nothing but "agent1_requirements started". Three minutes of honest waiting
+looked exactly like a hang, which in a demo is worse than an error: an error you can explain. The
+timeline now says *"Model unavailable — backing off 16s and retrying (attempt 3 of 5)"*, and every
+agent reports how long it took.

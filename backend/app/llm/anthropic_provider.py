@@ -20,12 +20,29 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from app.core.config import settings
 from app.core.logging import log
+from app.core import progress
 from app.llm.mock import mock_json, mock_text
 
 TRANSIENT = ("overloaded_error", "rate_limit_error", "api_error", "529", "503", "500", "timeout")
 PERMANENT = ("authentication_error", "permission_error", "not_found_error", "invalid_request_error")
 
 TOOL_NAME = "emit_structured_output"
+
+
+def _report_retry(state) -> None:
+    """Backing off is honest work — say so, on the timeline, where the user is actually looking.
+
+    Defined above the classes on purpose: it is referenced inside a @retry decorator, which is
+    evaluated when the class body is executed, not when the method is called.
+    """
+    wait = f"{state.next_action.sleep:.0f}s" if state.next_action else "?"
+    err = str(state.outcome.exception())[:100] if state.outcome else ""
+    log.warning("llm.retry", attempt=state.attempt_number, sleeping=wait, error=err)
+    progress.emit(
+        f"Model unavailable — backing off {wait} and retrying "
+        f"(attempt {state.attempt_number} of 5). {err}",
+        level="warning",
+    )
 
 
 class TransientError(RuntimeError):
@@ -85,9 +102,7 @@ class AnthropicProvider:
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, min=4, max=45),
         retry=retry_if_exception_type((TransientError, ConnectionError)),
-        before_sleep=lambda st: log.warning(
-            "anthropic.retry", attempt=st.attempt_number,
-            error=str(st.outcome.exception())[:120] if st.outcome else ""),
+        before_sleep=_report_retry,
         reraise=True,
     )
     def _call(self, *, model, system, prompt, temperature, task, tool=None):
@@ -173,3 +188,4 @@ def _to_anthropic_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if schema.get("type") != "object" or "properties" not in schema:
         raise ValueError("Anthropic tool schemas must be an object with properties at the top level.")
     return schema
+

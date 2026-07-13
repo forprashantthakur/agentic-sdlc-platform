@@ -22,6 +22,7 @@ Two structural choices worth calling out:
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -34,6 +35,7 @@ from app.agents.a4_requirement_docs import RequirementDocumentAgent
 from app.agents.a5_approval import ApprovalAgent
 from app.agents.a6_sprint import SprintAgent
 from app.agents.base import AgentContext
+from app.core import progress
 from app.core.db import SessionLocal
 from app.core.logging import log
 from app.graph.state import MAX_REVISIONS, SDLCState
@@ -67,11 +69,30 @@ def _ctx(db, state: SDLCState, gate: str | None = None) -> AgentContext:
 
 
 def _node(fn):
-    """Every agent node gets a session, an audit event, and uniform error capture."""
+    """Every agent node gets a session, an audit event, uniform error capture, a progress channel
+    and a stopwatch.
+
+    The channel matters more than it sounds: without it, a model backing off for thirty seconds is
+    indistinguishable from a hang. The stopwatch matters because "why is this slow" is unanswerable
+    without it — now every agent reports how long it actually took.
+    """
 
     def wrapper(state: SDLCState) -> dict[str, Any]:
         name = fn.__name__
         db = SessionLocal()
+        started = time.monotonic()
+
+        def report(message: str, level: str = "info") -> None:
+            # A separate session: the node's own transaction may be mid-flight, and a progress note
+            # must never be rolled back with it.
+            s = SessionLocal()
+            try:
+                s.add(RunEvent(run_id=state["run_id"], node=name, level=level, message=message))
+                s.commit()
+            finally:
+                s.close()
+
+        token = progress.set_channel(report)
         try:
             _event(db, state["run_id"], name, f"{name} started")
             db.commit()
@@ -91,14 +112,17 @@ def _node(fn):
             db.commit()
             raise
         finally:
+            progress.reset_channel(token)
             db.close()
 
     wrapper.__name__ = fn.__name__
     return wrapper
 
 
-def _result_to_state(db, state: SDLCState, node: str, res) -> dict[str, Any]:
-    _event(db, state["run_id"], node, res.notes, {"artifacts": res.artifacts, "external": res.external})
+def _result_to_state(db, state: SDLCState, node: str, res, seconds: float | None = None) -> dict[str, Any]:
+    note = res.notes if seconds is None else f"{res.notes}  ·  {seconds:.0f}s"
+    _event(db, state["run_id"], node, note,
+           {"artifacts": res.artifacts, "external": res.external, "seconds": seconds})
     return {
         "payloads": res.payloads,
         "artifacts": res.artifacts,
@@ -132,14 +156,16 @@ def ingest(db, state: SDLCState) -> dict[str, Any]:
 
 @_node
 def agent1_requirements(db, state: SDLCState) -> dict[str, Any]:
+    t0 = time.monotonic()
     res = RequirementGatheringAgent(_ctx(db, state)).run()
-    return _result_to_state(db, state, "agent1_requirements", res)
+    return _result_to_state(db, state, "agent1_requirements", res, time.monotonic() - t0)
 
 
 @_node
 def agent2_concept_note(db, state: SDLCState) -> dict[str, Any]:
+    t0 = time.monotonic()
     res = ConceptNoteAgent(_ctx(db, state, CONCEPT_GATE)).run()
-    return _result_to_state(db, state, "agent2_concept_note", res)
+    return _result_to_state(db, state, "agent2_concept_note", res, time.monotonic() - t0)
 
 
 @_node
@@ -170,14 +196,16 @@ def await_concept_approval(state: SDLCState) -> dict[str, Any]:
 
 @_node
 def agent3_wireframe(db, state: SDLCState) -> dict[str, Any]:
+    t0 = time.monotonic()
     res = WireframeAgent(_ctx(db, state, DOCS_GATE)).run()
-    return _result_to_state(db, state, "agent3_wireframe", res)
+    return _result_to_state(db, state, "agent3_wireframe", res, time.monotonic() - t0)
 
 
 @_node
 def agent4_requirement_docs(db, state: SDLCState) -> dict[str, Any]:
+    t0 = time.monotonic()
     res = RequirementDocumentAgent(_ctx(db, state, DOCS_GATE)).run()
-    return _result_to_state(db, state, "agent4_requirement_docs", res)
+    return _result_to_state(db, state, "agent4_requirement_docs", res, time.monotonic() - t0)
 
 
 @_node
@@ -207,8 +235,9 @@ def await_docs_approval(state: SDLCState) -> dict[str, Any]:
 
 @_node
 def agent6_sprint(db, state: SDLCState) -> dict[str, Any]:
+    t0 = time.monotonic()
     res = SprintAgent(_ctx(db, state), velocity=state.get("velocity", 15)).run()
-    return _result_to_state(db, state, "agent6_sprint", res)
+    return _result_to_state(db, state, "agent6_sprint", res, time.monotonic() - t0)
 
 
 @_node
