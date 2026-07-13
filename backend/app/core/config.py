@@ -73,7 +73,14 @@ class Settings(BaseSettings):
     # Ordered fallbacks, tried the instant the primary returns a transient error. NEVER WAIT IF
     # ANOTHER MODEL IS AVAILABLE — backoff is what you do when you have no alternative.
     # e.g. ["gemini-3.5-flash", "gemini-3.1-flash-lite", "anthropic:claude-sonnet-5"]
-    fallback_chain: list[str] = ["gemini-3.5-flash", "gemini-3.1-flash-lite"]
+    # Failing over from Gemini to Gemini is not failing over: when Google is overloaded, every
+    # Gemini model is on the same overloaded infrastructure. The chain must LEAVE the provider.
+    # Anthropic candidates are skipped automatically when no ANTHROPIC_API_KEY is configured.
+    fallback_chain: list[str] = [
+        "gemini-3.5-flash",
+        "anthropic:claude-haiku-4-5-20251001",
+        "gemini-3.1-flash-lite",
+    ]
     max_fallback_cycles: int = 3
 
     # Run Agent 3 (wireframes) and Agent 4 (documents) CONCURRENTLY. They are independent: both

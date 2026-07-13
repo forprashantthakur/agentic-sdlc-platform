@@ -211,12 +211,19 @@ class GeminiClient:
     @retry(
         # Five attempts with a real backoff: Gemini's overload spikes are usually seconds, not
         # minutes, and a six-agent run is far too expensive to abandon over one of them.
-        stop=stop_after_attempt(5),
+        stop=stop_after_attempt(2),
         # `attempt` is threaded through so the call can escalate its own token budget on truncation.
         wait=wait_exponential(multiplier=2, min=4, max=45),
         # TruncatedResponse is NOT retried here — _call_escalating handles it, because a retry that
         # changes nothing is not a retry.
-        retry=retry_if_exception_type((TransientError, json.JSONDecodeError, ConnectionError)),
+        #
+        # TransientError is NOT retried here EITHER, and that is the whole point. It used to be, with
+        # five attempts and exponential backoff — which meant a 503 slept for ~30s on a model we
+        # already knew was sick, while a HEALTHY model sat one line down in the fallback chain,
+        # unused. Two retry layers, and the dumb one ran first. Transient failures now propagate
+        # straight up to fallback.execute(), which switches model in ~1ms and only ever backs off
+        # once EVERY candidate has failed.
+        retry=retry_if_exception_type((json.JSONDecodeError,)),
         before_sleep=_report_retry,
         reraise=True,
     )

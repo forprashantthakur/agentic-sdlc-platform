@@ -57,6 +57,10 @@ def chain(primary: Candidate) -> list[Candidate]:
         if not model:
             provider, model = "gemini", provider
         c = Candidate(provider.strip().lower(), model.strip())
+        if c.provider == "anthropic" and not settings.anthropic_api_key:
+            continue          # no key => not a candidate. Offering it would just trip its breaker.
+        if c.provider == "gemini" and not settings.google_api_key:
+            continue
         if c not in out:
             out.append(c)
     return out
