@@ -564,3 +564,54 @@ briefly busy — which is exactly what happened.
 *can* run at once. On a free-tier key, six concurrent calls is the surest way to earn the 429 or 503
 above. Concurrency is a throughput optimisation — and a failed run is not a throughput problem. Raise
 it once you are on a paid quota.
+
+
+---
+
+## Choosing the model — per agent, not per platform
+
+```bash
+LLM_PROVIDER=gemini              # or: anthropic
+ANTHROPIC_API_KEY=<key>
+ANTHROPIC_MODEL=claude-opus-4-8
+
+# Route each agent independently:
+AGENT_MODELS={"agent1_requirements":"anthropic:claude-opus-4-8","agent2_concept_note":"gemini-3.5-flash","agent3_wireframe":"gemini-3.5-flash","agent4_requirement_docs":"gemini-3.5-flash","agent6_sprint":"gemini-3.5-flash"}
+```
+
+Check it with `GET /api/integrations/llm/routing` — which model each agent uses, and why.
+
+### Why per-agent, and not just "switch to Opus"
+
+The six agents are not doing the same kind of work.
+
+**Agent 1 is a judgement task.** It has to notice that the workshop minutes say the retry cap is
+three and the sponsor's call says merchant-configurable — and then *escalate rather than resolve*.
+That is where a frontier model earns its cost, and where a cheap one quietly picks a side and hands
+you a plausible, wrong requirement that nobody catches until UAT.
+
+**Agents 2, 3, 4 and 6 are structured transformation.** Approved requirements in, documents out,
+schema-constrained at the decoder. A fast model does this well.
+
+**Agent 5 has no model at all**, and never will.
+
+So paying frontier rates to format a sprint plan is waste, and paying budget rates to adjudicate a
+regulatory conflict is a false economy. The recommended configuration is Opus on Agent 1 and a fast
+model everywhere else.
+
+### Two things that do not change
+
+**Embeddings are always Gemini.** Anthropic has no embedding model, so retrieval — the thing that
+makes every requirement citable — stays on Gemini even when Claude does all the reasoning.
+`GOOGLE_API_KEY` remains required. A working Claude key with no Gemini key is a platform with no
+retrieval at all, and `/llm/selftest` now checks both independently for exactly that reason.
+
+**The guardrail survives the swap.** Gemini constrains decoding against a JSON Schema; Claude does it
+through *forced tool use* — the schema becomes a tool's `input_schema` and `tool_choice` compels the
+model to call it. Different mechanisms, same structural guarantee: an agent cannot emit a requirement
+without an id, a priority and a `source_evidence` array, because the decoder will not produce one.
+That is not a prompt instruction, and it is why swapping providers is safe.
+
+The model that actually ran is stamped on every artifact version — so a BRD written by Claude and one
+written by Gemini stay distinguishable months later, which is precisely what a model-risk review asks
+for.

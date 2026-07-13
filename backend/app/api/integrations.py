@@ -84,6 +84,28 @@ def figma_tools():
     }
 
 
+@router.get("/llm/routing")
+def llm_routing():
+    """Which model each agent actually uses — and why. Nobody should have to read env vars for this.
+
+    The model that produced a document is also stamped on every artifact version, so the audit trail
+    survives a provider change: a BRD written by Claude and a BRD written by Gemini are
+    distinguishable months later, which is exactly what a model-risk review will ask for.
+    """
+    from app.llm.router import describe_routing
+
+    return {
+        "default_provider": settings.llm_provider,
+        "embeddings": {
+            "provider": "gemini",
+            "model": settings.gemini_embed_model,
+            "note": "Always Gemini. Anthropic has no embedding model, so retrieval stays on Gemini "
+                    "even when Claude does the reasoning — GOOGLE_API_KEY remains required.",
+        },
+        "agents": describe_routing(),
+    }
+
+
 @router.get("/llm/selftest")
 def llm_selftest():
     """Prove the Gemini path works — one small structured call plus one embedding.
@@ -91,7 +113,15 @@ def llm_selftest():
     Run this the moment you set GOOGLE_API_KEY. A failure here is a second's feedback; the same
     failure discovered inside Agent 4 costs a full run and an unhelpful traceback.
     """
-    return gemini().selftest()
+    from app.llm.router import provider
+
+    out = {"default_provider": settings.llm_provider,
+           "reasoning": provider(settings.llm_provider).selftest()}
+    # Embeddings are always Gemini, whatever the reasoning provider — test them separately, because
+    # a working Claude key with a broken Gemini key is a platform with no retrieval at all.
+    out["embeddings"] = gemini().selftest().get("embeddings", {"ok": False, "error": "not run"})
+    out["ready"] = bool(out["reasoning"].get("ready") and out["embeddings"].get("ok"))
+    return out
 
 
 @router.get("/llm/models")

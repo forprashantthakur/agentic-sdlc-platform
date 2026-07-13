@@ -19,6 +19,23 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://sdlc:sdlc@localhost:5432/sdlc"
 
+    # Which provider the agents reason with: "gemini" | "anthropic".
+    # Embeddings are ALWAYS Gemini — Anthropic has no embedding model — so GOOGLE_API_KEY stays
+    # required even when Claude is doing the thinking.
+    llm_provider: str = "gemini"
+
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-opus-4-8"
+    anthropic_fast_model: str = "claude-sonnet-5"
+
+    # Per-agent overrides. JSON, e.g.
+    #   AGENT_MODELS={"agent1_requirements":"anthropic:claude-opus-4-8",
+    #                 "agent4_requirement_docs":"gemini-3.5-flash"}
+    # Agent 1 is the judgement task — it decides whether two sources contradict each other and
+    # refuses to resolve it. That is where a frontier model is worth paying for. The rest is
+    # structured transformation, and a fast model does it well.
+    agent_models: dict[str, str] = {}
+
     google_api_key: str = ""
     # Model names churn hard: 2.5 was retired for new keys, and gemini-3-pro now redirects.
     # These are current defaults, not guarantees — GET /api/integrations/llm/models asks YOUR key
