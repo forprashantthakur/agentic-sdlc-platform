@@ -22,6 +22,7 @@ import uuid
 from typing import Any
 
 from app.adapters.mcp import McpClient
+from app.core import progress
 from app.core.config import settings
 from app.core.logging import log
 
@@ -33,6 +34,13 @@ TOOLS: dict[str, list[str]] = {
     "generate_screen": ["generate_screen_from_text", "generate_screen", "create_screen",
                         "generate_ui", "stitch_generate_screen"],
     "get_screen": ["get_screen", "get_screen_html", "fetch_screen", "screen_get"],
+    # Stitch exposes the screenshot TWO different ways depending on the tool, and I only ever
+    # supported one of them:
+    #   get_screen        -> a download URL for the PNG
+    #   get_screen_image  -> the PNG itself, base64, in an MCP image content block
+    # A base64 block contains no "http" string, so the URL-walker discarded it without a word.
+    # That is why five screens generated correctly and every preview came back empty.
+    "get_screen_image": ["get_screen_image", "get_screenshot", "screen_image", "get_screen_png"],
     # Creating a design system and APPLYING one to existing screens are different tools with
     # different arguments. Conflating them (via a fuzzy match) is what silently killed the whole
     # wireframe step: apply_design_system rejected our args, and Agent 3 reported "screens pending".
@@ -138,8 +146,30 @@ class StitchAdapter:
                     )
                     h2, s2 = _artifacts(full)
                     html, shot = html or h2, shot or s2
-                except RuntimeError as e:
+                except Exception as e:
                     log.warning("stitch.get_screen_failed", screen=sc["name"], error=str(e))
+
+            # Still nothing? Ask for the image directly — this tool returns the PNG inline, base64.
+            if screen_id and not shot:
+                try:
+                    img = self.mcp.call(
+                        TOOLS["get_screen_image"],
+                        {"project_id": project_id, "screen_id": screen_id},
+                        operation="get_screen_image",
+                        fuzzy=False,
+                    )
+                    shot = _inline_image(img) or _artifacts(img)[1]
+                except Exception as e:
+                    log.warning("stitch.get_image_failed", screen=sc["name"], error=str(e))
+
+            if not shot:
+                # Say what actually came back, on the run timeline, instead of rendering an empty
+                # box and leaving someone to guess. Three rounds of guessing is enough.
+                progress.emit(
+                    f"Stitch returned no preview for '{sc['name']}'. Response keys: "
+                    f"{sorted({p.split('.')[0].split('[')[0] for p, _ in _walk(res)})[:8]}",
+                    level="warning",
+                )
 
             out_screens.append({
                 "name": sc["name"], "screen_id": screen_id,
@@ -172,6 +202,21 @@ def _device_type(design_system: str) -> str:
         if k in ds:
             return v
     return "AGNOSTIC"
+
+
+def _inline_image(res: dict[str, Any]) -> str:
+    """An MCP image content block -> a data: URI the browser can render directly.
+
+    No file store, no signed URL that expires in an hour, no extra endpoint to authenticate: the
+    bytes travel with the artifact and still render after a Render restart. It costs artifact size,
+    which for five screenshots is a trade worth making.
+    """
+    for block in res.get("images") or []:
+        data = block.get("data") or (block.get("resource") or {}).get("blob")
+        if data:
+            mime = block.get("mimeType") or (block.get("resource") or {}).get("mimeType") or "image/png"
+            return f"data:{mime};base64,{data}"
+    return ""
 
 
 IMAGE_HINT = ("image", "screenshot", "thumbnail", "preview", "png")
