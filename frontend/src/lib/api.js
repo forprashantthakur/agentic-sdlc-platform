@@ -27,6 +27,9 @@ export const api = {
   demoCatalog: () => req('/api/projects/demo/catalog'),
   seedProject: (key = 'upi_autopay') => req(`/api/projects/seed?key=${key}`, { method: 'POST' }),
   seedAll: () => req('/api/projects/seed/all', { method: 'POST' }),
+  deleteImpact: (id) => req(`/api/projects/${id}/impact`),
+  deleteProject: (id, confirm) =>
+    req(`/api/projects/${id}?confirm=${encodeURIComponent(confirm)}`, { method: 'DELETE' }),
 
   sources: (pid) => req(`/api/projects/${pid}/sources`),
   addSource: (pid, b) => req(`/api/projects/${pid}/sources`, { method: 'POST', body: JSON.stringify(b) }),

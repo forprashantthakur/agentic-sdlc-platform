@@ -1,10 +1,11 @@
 /** The supporting pages: real where the backend supports it, honest where it doesn't. */
-import { Blocks, Bot, CheckCircle2, Database, FileStack, FolderKanban, Search, Settings as SettingsIcon, ShieldCheck, XCircle } from 'lucide-react'
+import { Blocks, Bot, CheckCircle2, Database, FileStack, FolderKanban, Search, Settings as SettingsIcon, ShieldCheck, Trash2, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { cn, fmtDate, fmtDateTime, titleCase } from '../lib/utils'
-import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Confidence, Empty, Input, Label, Select, Skeleton } from '../components/ui'
+import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Confidence, Empty, Input, Label, Select, Skeleton, Tooltip } from '../components/ui'
+import DeleteProject from '../components/DeleteProject'
 
 const STATUS_TONE = {
   COMPLETED: 'success', 'AWAITING APPROVAL': 'warning', 'IN PROGRESS': 'brand',
@@ -15,6 +16,7 @@ export function Projects({ setProject, onSeed }) {
   const nav = useNavigate()
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
+  const [doomed, setDoomed] = useState(null)   // the project pending deletion
   useEffect(() => { api.projects().then(setRows).catch(() => setRows([])) }, [])
   if (!rows) return <Skeleton className="h-64" />
 
@@ -36,6 +38,13 @@ export function Projects({ setProject, onSeed }) {
         </div>
       </div>
 
+      <DeleteProject
+        project={doomed}
+        open={!!doomed}
+        onClose={() => setDoomed(null)}
+        onDeleted={(id) => setRows((r) => r.filter((x) => x.id !== id))}
+      />
+
       {filtered.length === 0 ? (
         <Empty icon={FolderKanban} title="No projects"
           hint="Start a new BRD from the left nav, or open the demo library — five banking projects with realistic, contradictory evidence."
@@ -43,14 +52,26 @@ export function Projects({ setProject, onSeed }) {
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {filtered.map((p) => (
-            <Card key={p.id} hover className="cursor-pointer" onClick={() => { setProject(p); nav('/new') }}>
+            <Card key={p.id} hover className="group cursor-pointer relative"
+              onClick={() => { setProject(p); nav('/new') }}>
               <CardBody>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="text-[14px] font-semibold truncate">{p.name}</h3>
                     <p className="text-[11.5px] text-muted mt-0.5">{p.business_unit}</p>
                   </div>
-                  <Badge tone={STATUS_TONE[p.status] || 'default'}>{p.status}</Badge>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Badge tone={STATUS_TONE[p.status] || 'default'}>{p.status}</Badge>
+                    <Tooltip label="Delete project">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDoomed(p) }}
+                        className="grid h-7 w-7 place-items-center rounded-lg text-muted opacity-0 transition-all hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+                        aria-label={`Delete ${p.name}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 {p.description && <p className="mt-2.5 text-[12px] text-muted line-clamp-2 leading-relaxed">{p.description}</p>}
                 <div className="mt-3.5 flex items-center gap-4 text-[11px] text-muted">

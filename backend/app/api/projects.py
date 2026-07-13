@@ -5,8 +5,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_session
+from app.core.logging import log
 from app.memory import rag
-from app.models import Artifact, Project, Run, RunStatus, Source
+from app.memory.vector_store import get_vector_store
+from app.models import (
+    Approval, ApprovalStatus, Artifact, ArtifactVersion, Project, Run, RunStatus, Source,
+)
 from app.schemas import BusinessContext, ProjectIn, ProjectOut, SourceIn
 from app.seed import CATALOG, catalog_summary
 from app.services import ingest
@@ -130,6 +134,135 @@ async def upload(
         })
 
     return {"uploaded": len(results), "files": results}
+
+
+@router.get("/{project_id}/impact")
+def delete_impact(project_id: str, db: Session = Depends(get_session)):
+    """What a delete would destroy. The UI shows this BEFORE asking for confirmation.
+
+    A project is not just rows. It is the audit trail: which human approved which version of which
+    document, produced by which agent, on which model. In a governed process that record is the
+    point. So we tell you exactly what you are about to lose, and we make you name the project to
+    prove you meant it.
+    """
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+
+    def n(model):
+        return db.scalar(select(func.count()).select_from(model).where(model.project_id == p.id)) or 0
+
+    approved = db.scalar(
+        select(func.count()).select_from(ArtifactVersion).join(Artifact)
+        .where(Artifact.project_id == p.id, ArtifactVersion.approved.is_(True))
+    ) or 0
+    decisions = db.scalar(
+        select(func.count()).select_from(Approval)
+        .where(Approval.project_id == p.id, Approval.status != ApprovalStatus.PENDING)
+    ) or 0
+
+    return {
+        "project": p.name,
+        "sources": n(Source),
+        "runs": n(Run),
+        "artifacts": n(Artifact),
+        "artifact_versions": db.scalar(
+            select(func.count()).select_from(ArtifactVersion).join(Artifact)
+            .where(Artifact.project_id == p.id)) or 0,
+        "approved_versions": approved,
+        "recorded_decisions": decisions,
+        "irreversible": True,
+        "warning": (
+            "This destroys the audit trail: every approval decision, every version, and the record of "
+            "which agent and which model produced each document."
+            if (approved or decisions) else
+            "Nothing has been approved on this project, so no sign-off record will be lost."
+        ),
+    }
+
+
+@router.delete("/{project_id}", status_code=200)
+def delete_project(project_id: str, confirm: str = "", db: Session = Depends(get_session)):
+    """Delete a project and everything it owns.
+
+    `confirm` must equal the project's name. Not a checkbox — a deliberate act of typing. Deleting
+    the wrong project in a governance tool is not a recoverable mistake, and a one-click delete next
+    to a project card is a trap.
+    """
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+
+    if confirm.strip() != p.name:
+        raise HTTPException(
+            400,
+            f"To delete this project, pass confirm=\"{p.name}\" — its exact name. "
+            "This is irreversible and destroys the approval history.",
+        )
+
+    # ORM cascades cover sources, runs, run events, artifacts and versions — they hang off
+    # relationships on Project. Three things do NOT, and each is a real leak:
+    #
+    #   1. Approvals. Project has no ORM relationship to them, and the DB-level ON DELETE CASCADE
+    #      is not enforced on SQLite. Orphaned approval rows in a governance tool are decision
+    #      records pointing at a project that no longer exists.
+    #   2. The vector store — long-term memory lives outside the relational schema. Leave it and a
+    #      deleted project keeps answering the copilot from beyond the grave.
+    #   3. LangGraph checkpoints — one thread per run. Leave them and the runs stay *resumable*: a
+    #      stale approval link could wake an agent for a project that is gone.
+    approvals = db.scalars(select(Approval).where(Approval.project_id == project_id)).all()
+    for a in approvals:
+        db.delete(a)          # ApprovalComment cascades off Approval, which does have a relationship
+    db.flush()
+
+    purged_chunks = _purge_memory(project_id)
+    purged_threads = _purge_checkpoints(db, project_id)
+
+    name = p.name
+    db.delete(p)
+    db.flush()
+    log.warning("project.deleted", project=name, id=project_id,
+                chunks=purged_chunks, threads=purged_threads)
+    return {
+        "deleted": name,
+        "approvals_purged": len(approvals),
+        "memory_purged": bool(purged_chunks),
+        "checkpoint_threads_purged": purged_threads,
+    }
+
+
+def _purge_memory(project_id: str) -> int:
+    try:
+        get_vector_store().purge(project_id=project_id)
+        return 1
+    except Exception as e:
+        log.error("project.delete.memory_purge_failed", project_id=project_id, error=str(e))
+        return 0
+
+
+def _purge_checkpoints(db: Session, project_id: str) -> int:
+    """Drop the LangGraph checkpoints for this project's runs.
+
+    A stranded checkpoint is not harmless: the thread stays resumable, so a stale approval link
+    could wake an agent for a project that no longer exists.
+    """
+    from app.core.db import IS_POSTGRES, engine
+
+    threads = [r.thread_id for r in db.scalars(select(Run).where(Run.project_id == project_id))]
+    if not threads or not IS_POSTGRES:
+        return 0
+
+    from sqlalchemy import text
+
+    n = 0
+    for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+        try:
+            with engine.begin() as c:
+                res = c.execute(text(f"DELETE FROM {table} WHERE thread_id = ANY(:t)"), {"t": threads})
+                n += res.rowcount or 0
+        except Exception as e:      # the tables may not exist yet on a fresh database
+            log.info("project.delete.checkpoint_skip", table=table, error=str(e)[:80])
+    return len(threads) if n else 0
 
 
 @router.delete("/{project_id}/sources/{source_id}", status_code=204)

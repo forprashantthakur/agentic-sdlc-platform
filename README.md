@@ -446,3 +446,34 @@ The **spec** is the artifact, not the picture. Agent 4 consumes the structured s
 the rendered image. So a provider outage, an expired key, or a monthly cap degrades to
 *"spec produced, screens pending"* — the run completes, the BRD is still written, and the wireframes
 can be re-rendered later. A wireframe generator is never allowed to fail a requirements run.
+
+
+---
+
+## Deleting a project
+
+```
+GET    /api/projects/{id}/impact          # what this would destroy
+DELETE /api/projects/{id}?confirm=<name>  # confirm must equal the project's exact name
+```
+
+In the console: **My Projects** → hover a card → the trash icon.
+
+Deleting a project is not deleting a row. It destroys the **audit trail** — which named human
+approved which version of which document, produced by which agent, on which model. In a governed
+process that record is the point. So the dialog:
+
+1. **Shows what will be destroyed**, fetched from the server rather than guessed, and calls out
+   *approved versions* and *recorded decisions* separately, in red, because those are the ones that
+   actually matter.
+2. **Makes you type the project's name.** Not a checkbox. A one-click delete beside a project card
+   is a trap, and the person who falls into it will be tired and in a hurry.
+
+Three things are cleaned up that a naive `DELETE` would leave behind, each a genuine leak:
+
+- **Approvals.** `Project` has no ORM relationship to them and SQLite does not enforce the DB-level
+  cascade — so they would survive as decision records pointing at a project that no longer exists.
+- **The vector store.** Long-term memory lives outside the relational schema. Leave it, and a
+  deleted project keeps answering the copilot from beyond the grave.
+- **LangGraph checkpoints.** One thread per run. Leave them and the runs stay *resumable* — a stale
+  approval link could wake an agent for a project that is gone.
