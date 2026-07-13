@@ -182,3 +182,48 @@ def llm_agents():
         "embeddings": {"model": settings.gemini_embed_model, "dims": settings.embed_dim,
                        "used_by": "RAG — every agent's retrieval, and the copilot"},
     }
+
+
+@router.get("/wireframes/probe")
+def wireframes_probe(prompt: str = "A simple login screen with email and password fields"):
+    """Generate ONE screen and return the RAW MCP responses, unparsed.
+
+    This exists because I guessed the shape of Stitch's response three times and was wrong three
+    times — the screenshot URL was never where I expected it. A probe that prints reality is worth
+    more than a fourth guess, and it means the next person to hit this does not repeat the exercise.
+    """
+    from app.adapters.stitch import TOOLS, StitchAdapter, _artifacts
+
+    adapter = registry.wireframer()
+    if not isinstance(adapter, StitchAdapter):
+        raise HTTPException(400, "Stitch is not the active provider, or it is mocked.")
+
+    out: dict[str, Any] = {"server": settings.stitch_mcp_url}
+    try:
+        project = adapter.mcp.call(TOOLS["create_project"], {"title": "Probe"},
+                                   operation="create_project")
+        out["create_project_raw"] = project
+        pid = project.get("project_id") or project.get("id") or project.get("projectId", "")
+
+        gen = adapter.mcp.call(
+            TOOLS["generate_screen"],
+            {"project_id": pid, "prompt": prompt, "device_type": "MOBILE"},
+            operation="generate_screen",
+        )
+        out["generate_screen_raw"] = gen
+        sid = gen.get("screen_id") or gen.get("id") or gen.get("screenId", "")
+
+        if sid:
+            out["get_screen_raw"] = adapter.mcp.call(
+                TOOLS["get_screen"], {"project_id": pid, "screen_id": sid}, operation="get_screen",
+            )
+
+        html, shot = _artifacts({**gen, **out.get("get_screen_raw", {})})
+        out["extracted"] = {"html_url": html or None, "screenshot_url": shot or None}
+        out["verdict"] = ("Extraction works — screens will render."
+                          if shot else
+                          "No image URL found anywhere in the response. Send me create/generate/get "
+                          "raw output above and I will map it.")
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    return out

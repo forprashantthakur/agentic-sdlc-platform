@@ -145,15 +145,19 @@ class StitchAdapter:
                 "name": sc["name"], "screen_id": screen_id,
                 "screenshot_url": shot,      # a download URL for the PNG
                 "html_url": html,            # a download URL for the HTML
-                "url": res.get("url") or (f"https://stitch.withgoogle.com/projects/{project_id}"
-                                          if project_id else ""),
+                # Only link where Stitch told us to. A hand-built URL that 404s is worse than no
+                # link — it makes a working integration look broken.
+                "url": next((v for _, v in _walk(res)
+                             if v.startswith("https://stitch.withgoogle.com")), ""),
                 "requirement_ids": sc.get("requirement_ids", []),
             })
 
         return {
             "provider": "stitch",
             "project_id": project_id,
-            "project_url": project.get("url", f"https://stitch.withgoogle.com/projects/{project_id}"),
+            "project_url": next(
+                (v for _, v in _walk(project) if v.startswith("https://stitch.withgoogle.com")), ""
+            ),
             "screens": out_screens,
             "frames": [s["name"] for s in out_screens],
         }
@@ -170,12 +174,42 @@ def _device_type(design_system: str) -> str:
     return "AGNOSTIC"
 
 
+IMAGE_HINT = ("image", "screenshot", "thumbnail", "preview", "png")
+HTML_HINT = ("html", "code", "source")
+
+
+def _walk(obj: Any, path: str = ""):
+    """Every (key-path, string) pair in a response, however deeply it is nested."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _walk(v, f"{path}.{k}" if path else k)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _walk(v, f"{path}[{i}]")
+    elif isinstance(obj, str):
+        yield path, obj
+
+
 def _artifacts(res: dict[str, Any]) -> tuple[str, str]:
-    """Pull the HTML and screenshot download URLs out of a response, whatever it calls them."""
-    html = (res.get("html") or res.get("html_url") or res.get("htmlUrl")
-            or res.get("html_download_url") or "")
-    shot = (res.get("image") or res.get("image_url") or res.get("imageUrl")
-            or res.get("screenshot") or res.get("screenshot_url") or res.get("screenshotUrl") or "")
+    """Find the HTML and screenshot URLs wherever they actually are.
+
+    I have now guessed the shape of this response three times and been wrong three times. The fix is
+    not a better guess — it is to stop guessing: walk the whole response, and take any URL whose
+    key-path or file extension says what it is. If Stitch nests it, renames it, or moves it, this
+    keeps working.
+
+    (And when it does not, /api/integrations/wireframes/probe prints the raw response so the next
+    person does not have to guess either.)
+    """
+    html = shot = ""
+    for path, val in _walk(res):
+        if not val.startswith("http"):
+            continue
+        key = path.lower()
+        if not shot and (any(h in key for h in IMAGE_HINT) or val.split("?")[0].endswith((".png", ".jpg", ".webp"))):
+            shot = val
+        elif not html and (any(h in key for h in HTML_HINT) or val.split("?")[0].endswith(".html")):
+            html = val
     return html, shot
 
 

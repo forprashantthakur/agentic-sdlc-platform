@@ -71,11 +71,15 @@ export default function Wireframes({ payload }) {
         <Layers className="h-4 w-4 text-brand" />
         <CardTitle>Generated screens — {(wf.provider || 'stitch').replace(/^\w/, (c) => c.toUpperCase())}</CardTitle>
         <Badge tone="brand" className="ml-auto">{screens.length}</Badge>
-        {wf.project_url && (
+        {/* Only link where the provider actually gave us a URL. A hand-built link that 404s makes a
+            working integration look broken — which is precisely what happened. */}
+        {wf.project_url ? (
           <a href={wf.project_url} target="_blank" rel="noreferrer"
             className="flex items-center gap-1 text-[11.5px] font-semibold text-brand hover:underline">
             Open project <ExternalLink className="h-3 w-3" />
           </a>
+        ) : (
+          <span className="text-[11px] text-muted">No project link returned</span>
         )}
       </CardHeader>
       <CardBody className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -91,8 +95,15 @@ export default function Wireframes({ payload }) {
                 />
               </a>
             ) : (
-              <div className="grid h-56 w-full place-items-center bg-bg">
-                <span className="text-[11.5px] text-muted">No preview returned</span>
+              <div className="grid h-56 w-full place-items-center bg-bg px-4 text-center">
+                <div>
+                  <p className="text-[11.5px] font-medium text-muted">No preview returned</p>
+                  <p className="mt-1 text-[10.5px] text-muted/80">
+                    The screen was generated — Stitch just did not hand back an image URL where we
+                    looked. Run <code className="font-mono">/api/integrations/wireframes/probe</code> to
+                    see the raw response.
+                  </p>
+                </div>
               </div>
             )}
             <div className="p-3">
