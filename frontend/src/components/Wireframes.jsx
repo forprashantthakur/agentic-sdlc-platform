@@ -1,4 +1,5 @@
-import { AlertTriangle, ExternalLink, Image as ImageIcon, Layers } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Image as ImageIcon, Layers, Maximize2, X } from 'lucide-react'
+import { useState } from 'react'
 import { Badge, Card, CardBody, CardHeader, CardTitle, Empty } from './ui'
 
 /**
@@ -13,6 +14,7 @@ import { Badge, Card, CardBody, CardHeader, CardTitle, Empty } from './ui'
  * not exist, and if one shows up here with an empty trace, that is worth noticing.
  */
 export default function Wireframes({ payload }) {
+  const [zoom, setZoom] = useState(null)
   const wf = payload?.wireframes || payload?.figma
   const screens = wf?.screens || []
 
@@ -66,6 +68,7 @@ export default function Wireframes({ payload }) {
   }
 
   return (
+    <>
     <Card>
       <CardHeader>
         <Layers className="h-4 w-4 text-brand" />
@@ -82,20 +85,31 @@ export default function Wireframes({ payload }) {
           <span className="text-[11px] text-muted">No project link returned</span>
         )}
       </CardHeader>
-      <CardBody className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <CardBody className="grid gap-5 lg:grid-cols-2">
         {screens.map((s) => (
           <div key={s.screen_id || s.name} className="rounded-xl border border-line bg-bg/40 overflow-hidden">
             {s.screenshot_url ? (
-              <a href={s.url || s.screenshot_url} target="_blank" rel="noreferrer">
+              // A 1440x900 wireframe squeezed into a 224px-tall thumbnail is unreadable, which is
+              // the whole complaint. Show it big, and let a click open it at full size.
+              <button
+                type="button"
+                onClick={() => setZoom(s)}
+                className="group relative block w-full cursor-zoom-in"
+                title="Click to view full size"
+              >
                 <img
                   src={s.screenshot_url}
                   alt={s.name}
                   loading="lazy"
-                  className="h-56 w-full bg-white object-contain transition-transform hover:scale-[1.02]"
+                  className="aspect-[16/10] w-full bg-white object-contain"
                 />
-              </a>
+                <span className="absolute right-2 top-2 rounded-md bg-ink/70 px-2 py-1 text-[10px]
+                                 font-semibold text-white opacity-0 transition group-hover:opacity-100">
+                  <Maximize2 className="mr-1 inline h-3 w-3" />Full size
+                </span>
+              </button>
             ) : (
-              <div className="grid h-56 w-full place-items-center bg-bg px-4 text-center">
+              <div className="grid aspect-[16/10] w-full place-items-center bg-bg px-4 text-center">
                 <div>
                   <p className="text-[11.5px] font-medium text-muted">No preview returned</p>
                   <p className="mt-1 text-[10.5px] text-muted/80">
@@ -126,5 +140,29 @@ export default function Wireframes({ payload }) {
         ))}
       </CardBody>
     </Card>
+
+      {zoom ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-ink/80 p-6 backdrop-blur-sm"
+          onClick={() => setZoom(null)}
+          role="dialog"
+        >
+          <div className="max-h-full w-full max-w-6xl overflow-auto rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+              <div>
+                <p className="text-sm font-semibold">{zoom.name}</p>
+                <p className="text-[11px] text-muted">
+                  Traces to {(zoom.requirement_ids || []).join(', ') || '—'}
+                </p>
+              </div>
+              <button onClick={() => setZoom(null)} className="rounded-md p-1.5 hover:bg-bg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <img src={zoom.screenshot_url} alt={zoom.name} className="w-full" />
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }

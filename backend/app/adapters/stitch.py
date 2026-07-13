@@ -24,6 +24,7 @@ import uuid
 from typing import Any
 
 from app.adapters.mcp import McpClient
+from app.adapters.wireframe_render import render as render_wireframe_png
 from app.core import progress
 from app.core.config import settings
 from app.core.logging import log
@@ -310,50 +311,10 @@ def _esc(t: str) -> str:
     return (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def render_wireframe_png(screen: dict[str, Any], brand: tuple = (0, 76, 143)) -> str:
-    """Draw the screen spec as a PNG wireframe and return it as a data: URI.
-
-    PNG, not SVG, and that is not an aesthetic choice: python-docx cannot embed SVG at all, so an
-    SVG wireframe renders in the browser and then silently vanishes from the Word export. PNG is the
-    one format the browser, WeasyPrint and Word all accept — and it is what real Stitch returns, so
-    the offline and live paths converge on a single code path instead of two.
-    """
-    from PIL import Image, ImageDraw
-
-    W, H, S = 520, 360, 2                       # 2x supersample -> crisp text when scaled down
-    img = Image.new("RGB", (W * S, H * S), "white")
-    d = ImageDraw.Draw(img)
-
-    d.rectangle([0, 0, W * S, 34 * S], fill=brand)
-    d.text((14 * S, 11 * S), str(screen.get("name", "Screen"))[:40], fill="white")
-    d.rectangle([0, 34 * S, 86 * S, H * S], fill="#F4F7FB")
-    for i in range(5):
-        d.rounded_rectangle([12 * S, (50 + i * 22) * S, 74 * S, (58 + i * 22) * S], radius=4 * S,
-                            fill="#DCE4EE")
-
-    y = 50
-    for c in (screen.get("components") or [])[:9]:
-        ctype = str(c.get("type", "")).lower()
-        label = str(c.get("label", ""))[:52]
-        fill, stroke = next((v for k, v in _FILL.items() if k in ctype), ("#F8FAFC", "#DCE4EE"))
-        h = 44 if any(k in ctype for k in ("table", "list", "chart", "card")) else 26
-        if y + h > H - 12:
-            break
-        d.rounded_rectangle([100 * S, y * S, (W - 16) * S, (y + h) * S], radius=5 * S,
-                            fill=fill, outline=stroke, width=S)
-        d.text((110 * S, (y + h // 2 - 5) * S), label,
-               fill="white" if fill == "#004C8F" else "#4A5A6B")
-        y += h + 10
-
-    img = img.resize((W, H), Image.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-
-
 class MockStitchAdapter:
     def create_wireframes(self, *, project_name, screens, design_system) -> dict[str, Any]:
         pid = uuid.uuid4().hex[:12]
+        nav = [s["name"] for s in screens]     # every screen sees the whole flow in its own nav
         log.info("stitch.mock.create", screens=len(screens))
         return {
             "provider": "stitch",
@@ -366,7 +327,7 @@ class MockStitchAdapter:
                 # A REAL wireframe, drawn from Agent 3's own component spec. Previously this was a
                 # link to example.invalid, which 404s by design — honest, but it rendered as an
                 # empty grey box, which is the last thing you want on a projector.
-                "screenshot_url": render_wireframe_png(s),
+                "screenshot_url": render_wireframe_png({**s, "_nav": nav}, project=project_name),
                 "html_url": "",
                 "url": "",
                 "rendered_offline": True,

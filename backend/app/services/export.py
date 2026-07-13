@@ -214,7 +214,7 @@ def _docx_blocks(doc: Document, blocks: list[Block]) -> None:
                     para = cells[j].paragraphs[0]
                     if (src := image_src(val)) and (raw := image_bytes(src)):
                         # The wireframe itself, in the cell. This is the whole point of the export.
-                        para.add_run().add_picture(io.BytesIO(raw), width=Inches(2.6))
+                        para.add_run().add_picture(io.BytesIO(raw), width=Inches(4.2))
                         continue
                     r = para.add_run(val)
                     r.font.size = Pt(9)
@@ -311,7 +311,7 @@ def to_docx(versions: list[ArtifactVersion], *, project_name: str, pack: bool = 
 
 # ──────────────────────────────────── PDF ─────────────────────────────────────
 CSS = """
-img.shot { width: 260px; border: 1px solid #DCE4EE; border-radius: 4px; }
+img.shot { width: 430px; border: 1px solid #DCE4EE; border-radius: 4px; }
 img.shot.wide { width: 480px; }
 @page { size: A4; margin: 20mm 16mm 18mm 16mm;
   @bottom-center { content: "HDFC Bank · Agentic SDLC Platform · Page " counter(page) " of " counter(pages);
