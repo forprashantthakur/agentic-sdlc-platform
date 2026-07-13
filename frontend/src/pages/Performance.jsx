@@ -87,7 +87,7 @@ export default function Performance() {
 
   const load = useCallback(async () => {
     try {
-      setM(await api.get('/api/metrics'))
+      setM(await api.metrics())
       setErr(null)
     } catch (e) {
       setErr(e.message)

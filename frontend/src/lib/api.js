@@ -16,7 +16,13 @@ async function req(path, opts = {}) {
 export const API_BASE = BASE
 
 export const api = {
+  // A generic GET. Its absence is why the Stitch probe and the Performance page both died with
+  // "api.get is not a function" — in the browser, before the request was ever sent.
+  get: (path) => req(path),
+
   health: () => req('/health'),
+  metrics: () => req('/api/metrics'),
+  stitchProbe: () => req('/api/integrations/wireframes/probe'),
   stats: () => req('/api/dashboard/stats'),
   queue: () => req('/api/dashboard/queue'),
 

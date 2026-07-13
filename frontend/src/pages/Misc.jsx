@@ -367,7 +367,7 @@ export function Integrations() {
   const runProbe = async () => {
     setProbing(true)
     try {
-      setProbe(await api.get('/api/integrations/wireframes/probe'))
+      setProbe(await api.stitchProbe())
     } catch (e) {
       setProbe({ error: e.message })
     } finally {
