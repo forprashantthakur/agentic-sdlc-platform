@@ -39,6 +39,24 @@ class TruncatedResponse(RuntimeError):
     """The model ran out of output budget mid-answer. Retrying with a smaller ask may help."""
 
 
+class TransientError(RuntimeError):
+    """Gemini is overloaded or rate-limiting us. Wait and try again — the request itself is fine.
+
+    This class exists because the distinction matters enormously and the API does not make it for
+    you. A 503 UNAVAILABLE ("high demand, try again later") and a 429 with `limit: 0` ("this model
+    is paid-only on your key") arrive looking similar and mean opposite things. One resolves itself
+    if you wait four seconds; the other never will, however long you wait. Retrying the second is a
+    waste of a minute; NOT retrying the first throws away an entire six-agent run because Google had
+    a busy moment.
+    """
+
+
+PERMANENT = ("limit: 0", "NOT_FOUND", "no longer available", "API key not valid",
+             "PERMISSION_DENIED", "billing")
+TRANSIENT = ("UNAVAILABLE", "503", "overloaded", "high demand", "500", "INTERNAL",
+             "DEADLINE_EXCEEDED", "504")
+
+
 class GeminiClient:
     def __init__(self) -> None:
         self._client = None
@@ -124,9 +142,18 @@ class GeminiClient:
 
     # ── internals ─────────────────────────────────────────────────────────────
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(min=2, max=20),
-        retry=retry_if_exception_type((TruncatedResponse, json.JSONDecodeError, ConnectionError)),
+        # Five attempts with a real backoff: Gemini's overload spikes are usually seconds, not
+        # minutes, and a six-agent run is far too expensive to abandon over one of them.
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=4, max=45),
+        retry=retry_if_exception_type(
+            (TransientError, TruncatedResponse, json.JSONDecodeError, ConnectionError)
+        ),
+        before_sleep=lambda st: log.warning(
+            "gemini.retry", attempt=st.attempt_number,
+            sleeping=f"{st.next_action.sleep:.0f}s" if st.next_action else "-",
+            error=str(st.outcome.exception())[:120] if st.outcome else "",
+        ),
         reraise=True,
     )
     def _call(
@@ -150,6 +177,14 @@ class GeminiClient:
             resp = self._client.models.generate_content(model=model, contents=prompt, config=cfg)
         except Exception as e:
             msg = str(e)
+
+            # Transient FIRST — but only if it is not one of the permanent conditions. A 429 can be
+            # either ("slow down" vs "you have no quota for this model, ever"), and getting that
+            # wrong in either direction is expensive.
+            if any(t in msg for t in TRANSIENT) and not any(p in msg for p in PERMANENT):
+                raise TransientError(
+                    f"{task}: Gemini is overloaded ({model}). Backing off and retrying."
+                ) from e
             # "limit: 0" is not "you ran out" — it is "this model has no free-tier quota on this
             # project at all". Those are completely different problems and the raw error does a
             # poor job of saying so.
@@ -163,6 +198,12 @@ class GeminiClient:
                     "set GEMINI_MODEL to one of them."
                 ) from e
             if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+                if "limit: 0" not in msg:
+                    # A real rate limit: requests-per-minute, not a hard entitlement. Worth waiting for.
+                    raise TransientError(
+                        f"{task}: rate limited on '{model}'. Backing off. "
+                        "Agent 4 fires six generations at once — if this repeats, that is why."
+                    ) from e
                 if "limit: 0" in msg:
                     raise RuntimeError(
                         f"{task}: '{model}' has NO free-tier quota on this API key (limit: 0). "

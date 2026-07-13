@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # too low a budget truncates it into unparseable JSON.
     max_output_tokens: int = 32768
 
+    # How many generations Agent 4 may run at once. Default 1: on a free-tier key, six concurrent
+    # calls is the surest way to earn a 429 or a 503, and a failed run costs far more than the
+    # minute the concurrency saved. Raise it once you are on a paid quota.
+    gemini_concurrency: int = 1
+
     use_vertex: bool = False
     vertex_project: str = ""
     vertex_location: str = "asia-south1"

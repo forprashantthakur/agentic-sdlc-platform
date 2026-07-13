@@ -541,3 +541,26 @@ space of one afternoon this platform hit all three of these:
 Each of those is now caught and re-raised with the fix named in the error text, rather than a
 200-line provider stack trace. But the durable answer is not a better default — it is to **ask the
 API**, which is what this endpoint does.
+
+
+---
+
+## Transient vs permanent: why a 503 must not kill a run
+
+Gemini returns these, and they look alike but mean opposite things:
+
+| Error | Meaning | What we do |
+|---|---|---|
+| `503 UNAVAILABLE — high demand` | Google had a busy moment | **Retry**, exponential backoff, 5 attempts |
+| `429 — quota exceeded, retry in 40s` | Real rate limit (requests/minute) | **Retry** |
+| `429 — limit: 0` | This model is **paid-only on your key** | **Fail fast** — waiting will never help |
+| `404 — no longer available` | Model retired | **Fail fast** |
+
+Getting that distinction wrong is expensive in both directions. Retrying a `limit: 0` wastes a
+minute and still fails. *Not* retrying a 503 throws away an entire six-agent run because Google was
+briefly busy — which is exactly what happened.
+
+**`GEMINI_CONCURRENCY` (default 1).** Agent 4 generates six documents; they are independent, so they
+*can* run at once. On a free-tier key, six concurrent calls is the surest way to earn the 429 or 503
+above. Concurrency is a throughput optimisation — and a failed run is not a throughput problem. Raise
+it once you are on a paid quota.

@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.schemas import API_REQUIREMENTS, DOCUMENT, NFR, USER_STORIES
+from app.core.config import settings
 from app.models import ArtifactType
 
 DOC_PROMPT = """PROJECT: {project}
@@ -153,8 +154,11 @@ class RequirementDocumentAgent(BaseAgent):
                 temperature=0.25,
             )
 
-        # BRD / FRD / SRS are independent of each other — generate them concurrently.
-        with ThreadPoolExecutor(max_workers=3) as ex:
+        # BRD / FRD / SRS are independent, so they *can* run concurrently — but firing three
+        # (plus three more below) at a free-tier quota is the surest way to earn a 429 or a 503.
+        # Concurrency is a throughput optimisation; a failed run is not a throughput problem.
+        workers = 3 if settings.gemini_concurrency > 1 else 1
+        with ThreadPoolExecutor(max_workers=min(workers, settings.gemini_concurrency)) as ex:
             brd, frd, srs = ex.map(doc, ["BRD", "FRD", "SRS"])
 
         frd_json = json.dumps(frd, indent=2)[:16000]
