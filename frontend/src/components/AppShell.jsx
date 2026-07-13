@@ -105,8 +105,13 @@ export default function AppShell({ children, pending = 0, project, health }) {
           </div>
           <div className="flex items-center gap-2">
             {health?.integrations && (
+              // Show the model that is ACTUALLY configured. This badge used to read
+              // "GEMINI 2.5 PRO" no matter what was running — a label that lies about provenance
+              // is worse than no label, and this one sits at the top of every screenshot.
               <Badge tone={health.integrations.llm === 'live' ? 'success' : 'warning'}>
-                {health.integrations.llm === 'live' ? 'GEMINI 2.5 PRO · LIVE' : 'MOCK MODE'}
+                {health.integrations.llm === 'live'
+                  ? `${(health.integrations.model || '').split(':').pop().toUpperCase()} · LIVE`
+                  : 'MOCK MODE'}
               </Badge>
             )}
             <Tooltip label={copilot ? 'Hide AI Copilot' : 'Show AI Copilot'}>

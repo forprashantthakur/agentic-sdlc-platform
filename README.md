@@ -660,3 +660,31 @@ truncation** (up to a 65,536-token ceiling) and reports it on the timeline. If i
 at the ceiling, it says so plainly: *that is not a budget problem — the generation is too large.*
 
 `MAX_OUTPUT_TOKENS` (default 32,768) is the **starting** budget, not the limit.
+
+
+### Why it feels slow — and the three levers
+
+Gemini 3.x **thinks before it answers**, and that thinking is most of the latency you feel. It is
+also, in exactly one place, the thing you are paying for.
+
+| Lever | Fast demo | Best judgement |
+|---|---|---|
+| `GEMINI_MODEL` | `gemini-3.5-flash` | `gemini-3.1-pro-preview` |
+| `GEMINI_THINKING_BUDGET` | `0` (off) | `-1` (model default) |
+| `GEMINI_CONCURRENCY` | `3` | `3` |
+| `MAX_OUTPUT_TOKENS` | `32768` | `32768` |
+
+**But do not turn thinking off globally without reading this.** Agent 1's entire job is to notice
+that the workshop minutes say one thing, the sponsor's call says another, and to *escalate rather
+than resolve*. That is a judgement call, and it is the one place the thinking budget earns its
+seconds. Everything downstream — concept note, BRD, FRD, stories, sprint plan — is structured
+transformation against an approved input, where it mostly does not.
+
+So the configuration that is both fast and honest:
+
+```bash
+GEMINI_THINKING_BUDGET=0
+AGENT_THINKING={"agent1_requirements":-1}
+```
+
+Thinking off everywhere, full thinking for the one agent whose reasoning is the actual product.

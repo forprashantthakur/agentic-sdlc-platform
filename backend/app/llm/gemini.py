@@ -101,7 +101,7 @@ class GeminiClient:
     # ── public API ────────────────────────────────────────────────────────────
     def generate_json(
         self, *, system: str, prompt: str, schema: dict[str, Any], task: str,
-        model: str | None = None, temperature: float = 0.2,
+        model: str | None = None, temperature: float = 0.2, thinking: int | None = None,
     ) -> dict[str, Any]:
         """Constrained generation. Returns a dict conforming to `schema`."""
         if not self.live:
@@ -111,6 +111,7 @@ class GeminiClient:
             model=model or settings.gemini_model,
             system=system, prompt=prompt, temperature=temperature,
             json_schema=schema, task=task,
+            thinking=settings.gemini_thinking_budget if thinking is None else thinking,
         )
         try:
             return json.loads(raw)
@@ -192,7 +193,7 @@ class GeminiClient:
     )
     def _call(
         self, *, model: str, system: str, prompt: str, temperature: float, task: str,
-        json_schema: dict | None = None, attempt: int = 1,
+        json_schema: dict | None = None, attempt: int = 1, thinking: int | None = None,
     ) -> str:
         from google.genai import types
 
@@ -209,6 +210,13 @@ class GeminiClient:
             temperature=temperature,
             max_output_tokens=budget,
         )
+
+        # Thinking is where the seconds go. -1 leaves the model's default alone; 0 turns it off.
+        if thinking is not None and thinking >= 0:
+            try:
+                cfg.thinking_config = types.ThinkingConfig(thinking_budget=thinking)
+            except Exception as e:      # older SDKs, or a model that does not support it
+                log.info("gemini.thinking_unsupported", error=str(e)[:80])
         if json_schema is not None:
             # `response_json_schema` — NOT `response_schema`. The latter coerces a dict and
             # quietly drops constraints it cannot map.

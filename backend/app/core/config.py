@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     # retrying the identical request — a retry that changes nothing is not a retry.
     max_output_tokens: int = 32768
 
+    # Gemini 3.x THINKS before it answers, and that thinking is most of the latency you feel.
+    #   -1  = model default (deep thinking; slowest, best judgement)
+    #    0  = off (fastest)
+    #   >0  = a token budget for reasoning
+    #
+    # Worth being deliberate about, because it is not a free lunch: Agent 1's whole job is to notice
+    # that two sources contradict each other and REFUSE to resolve it. That is the one place thinking
+    # earns its latency. Everything downstream is structured transformation, where it mostly does not.
+    # Hence the per-agent override below.
+    gemini_thinking_budget: int = -1
+
+    # e.g. {"agent1_requirements": -1, "agent2_concept_note": 0, "agent4_requirement_docs": 0}
+    agent_thinking: dict[str, int] = {}
+
     # How many generations Agent 4 may run at once. Default 1: on a free-tier key, six concurrent
     # calls is the surest way to earn a 429 or a 503, and a failed run costs far more than the
     # minute the concurrency saved. Raise it once you are on a paid quota.

@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.logging import log
 from app.llm.router import llm_for
 from app.memory import rag
@@ -72,10 +73,20 @@ class BaseAgent:
         llm, model = llm_for(self.id)
         log.info("agent.generate", agent=self.id, task=task, run=self.ctx.run_id,
                  model=model or llm.model_name)
-        return llm.generate_json(
-            system=BANK_SYSTEM, prompt=prompt, schema=schema, task=task,
-            model=model, temperature=temperature,
-        )
+        kwargs: dict = {}
+        think = (settings.agent_thinking or {}).get(self.id)
+        if think is not None and hasattr(llm, "generate_json"):
+            kwargs["thinking"] = think
+        try:
+            return llm.generate_json(
+                system=BANK_SYSTEM, prompt=prompt, schema=schema, task=task,
+                model=model, temperature=temperature, **kwargs,
+            )
+        except TypeError:      # a provider that does not take `thinking` (Anthropic)
+            return llm.generate_json(
+                system=BANK_SYSTEM, prompt=prompt, schema=schema, task=task,
+                model=model, temperature=temperature,
+            )
 
     @property
     def model_used(self) -> str:
