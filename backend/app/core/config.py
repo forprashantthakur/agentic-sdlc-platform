@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     # no paid seat. Figma's write-to-canvas wants geometry and a Full seat on a paid plan.
     wireframe_provider: str = "stitch"
 
-    stitch_mcp_url: str = "https://stitch.withgoogle.com/mcp"
+    # Verified against google-labs-code/stitch-sdk. It is googleapis.com, not withgoogle.com.
+    stitch_mcp_url: str = "https://stitch.googleapis.com/mcp"
     stitch_api_key: str = ""
     stitch_mock: bool | None = None
 

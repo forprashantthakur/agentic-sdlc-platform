@@ -412,8 +412,20 @@ requirement each screen traces to, and a plain-English prompt — and a provider
 ```bash
 WIREFRAME_PROVIDER=stitch     # or: figma | mock
 STITCH_API_KEY=<key>
-STITCH_MCP_URL=https://stitch.withgoogle.com/mcp
+STITCH_MOCK=false             # blank inherits MOCK_MODE — this is the one people miss
+STITCH_MCP_URL=https://stitch.googleapis.com/mcp
 ```
+
+**No screens appearing?** Nine times out of ten it is one of these, in order:
+
+1. `GET /health` → `"wireframes": "mock"`. Stitch is mocked. You need **both** `STITCH_API_KEY`
+   **and** `STITCH_MOCK=false` (or `MOCK_MODE=false`). A key on its own does nothing: the mock wins,
+   deliberately, so a half-configured deploy degrades instead of erroring on every run.
+2. The mock's URLs point at `example.invalid` and 404 **on purpose**. A mock that returns a
+   plausible-looking Stitch link is how you end up debugging Stitch for an hour when Stitch was
+   never called.
+3. `GET /api/integrations/wireframes/tools` → if `missing_operations` is non-empty, the server
+   renamed a tool. Add the new name to `TOOLS` in `backend/app/adapters/stitch.py`.
 
 Then verify before you run a job:
 

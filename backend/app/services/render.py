@@ -78,10 +78,10 @@ def render_wireframe(p: dict[str, Any]) -> str:
             if wf.get("project_url") or wf.get("file_url"):
                 s += [f"- Project: {wf.get('project_url') or wf.get('file_url')}", ""]
             if wf.get("screens"):
-                s += [_tbl(["Screen", "Traces to", "Preview", "Link"],
+                s += [_tbl(["Screen", "Traces to", "Preview", "HTML"],
                            [[sc["name"], ", ".join(sc.get("requirement_ids", [])),
                              f"![{sc['name']}]({sc['screenshot_url']})" if sc.get("screenshot_url") else "—",
-                             sc.get("url", "—")] for sc in wf["screens"]]), ""]
+                             sc.get("html_url") or sc.get("url", "—")] for sc in wf["screens"]]), ""]
             elif wf.get("frames"):
                 s += [f"- Frames: {', '.join(wf['frames'])}", ""]
     if p.get("notes"):
