@@ -18,6 +18,7 @@ consumes downstream — is produced regardless, and the screens are marked pendi
 
 from __future__ import annotations
 
+import base64
 import uuid
 from typing import Any
 
@@ -285,6 +286,68 @@ def _prompt_for(screen: dict[str, Any], design_system: str) -> str:
     return "\n".join(p for p in parts if p is not None)
 
 
+
+# ── Offline wireframe rendering ───────────────────────────────────────────────────────────────
+# Agent 3 already produces a STRUCTURED screen spec: every component, with a type and a label. That
+# is enough to draw the screen ourselves. So the mock does not have to hand back a dead link and an
+# empty grey box — it can render the actual wireframe, from the actual spec, with zero network calls
+# and in about a millisecond.
+#
+# This is what makes a demo survivable when Google is returning 503s: the wireframes are real,
+# specific to the project, traceable to requirements, and cannot fail.
+
+_FILL = {
+    "input": ("#FFFFFF", "#C7D2E0"), "textfield": ("#FFFFFF", "#C7D2E0"),
+    "button": ("#004C8F", "#004C8F"), "cta": ("#004C8F", "#004C8F"),
+    "table": ("#F4F7FB", "#C7D2E0"), "list": ("#F4F7FB", "#C7D2E0"),
+    "card": ("#F8FAFC", "#DCE4EE"), "chart": ("#EEF4FB", "#C7D2E0"),
+    "banner": ("#FFF6E5", "#F0C879"), "alert": ("#FFF1F1", "#E9A8A8"),
+}
+
+
+def _esc(t: str) -> str:
+    return (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def render_wireframe_svg(screen: dict[str, Any], brand: str = "#004C8F") -> str:
+    """Draw the screen spec as an SVG wireframe and return it as a data: URI."""
+    comps = (screen.get("components") or [])[:9]
+    W, H = 520, 360
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">',
+        f'<rect width="{W}" height="{H}" fill="#FFFFFF"/>',
+        f'<rect x="0" y="0" width="{W}" height="34" fill="{brand}"/>',
+        f'<text x="14" y="22" font-family="Inter,Arial" font-size="12" fill="#FFFFFF" '
+        f'font-weight="600">{_esc(screen.get("name", "Screen"))}</text>',
+        f'<rect x="0" y="34" width="86" height="{H - 34}" fill="#F4F7FB"/>',
+    ]
+    for i in range(5):                                   # left nav rails
+        parts.append(f'<rect x="12" y="{50 + i * 22}" width="62" height="8" rx="4" fill="#DCE4EE"/>')
+
+    y = 50
+    for c in comps:
+        ctype = str(c.get("type", "")).lower()
+        label = _esc(str(c.get("label", ""))[:44])
+        fill, stroke = next((v for k, v in _FILL.items() if k in ctype), ("#F8FAFC", "#DCE4EE"))
+        is_btn = fill == "#004C8F"
+        h = 44 if any(k in ctype for k in ("table", "list", "chart", "card")) else 26
+        if y + h > H - 12:
+            break
+        parts.append(
+            f'<rect x="100" y="{y}" width="{W - 116}" height="{h}" rx="5" fill="{fill}" '
+            f'stroke="{stroke}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="110" y="{y + (h // 2) + 4}" font-family="Inter,Arial" font-size="10" '
+            f'fill="{"#FFFFFF" if is_btn else "#4A5A6B"}">{label}</text>'
+        )
+        y += h + 10
+
+    parts.append('</svg>')
+    svg = "".join(parts)
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+
+
 class MockStitchAdapter:
     def create_wireframes(self, *, project_name, screens, design_system) -> dict[str, Any]:
         pid = uuid.uuid4().hex[:12]
@@ -297,11 +360,13 @@ class MockStitchAdapter:
             "screens": [{
                 "name": s["name"],
                 "screen_id": f"{pid}-{i}",
-                # Deliberately marked as mock URLs. They 404, and they should: a mock that hands back
-                # a plausible-looking link is how you end up wondering why Stitch "lost" your screens.
-                "screenshot_url": f"https://example.invalid/mock-stitch/{pid}/{i}/preview.png",
-                "html_url": f"https://example.invalid/mock-stitch/{pid}/{i}/screen.html",
-                "url": "https://stitch.withgoogle.com  (mock — set STITCH_API_KEY for real screens)",
+                # A REAL wireframe, drawn from Agent 3's own component spec. Previously this was a
+                # link to example.invalid, which 404s by design — honest, but it rendered as an
+                # empty grey box, which is the last thing you want on a projector.
+                "screenshot_url": render_wireframe_svg(s),
+                "html_url": "",
+                "url": "",
+                "rendered_offline": True,
                 "requirement_ids": s.get("requirement_ids", []),
             } for i, s in enumerate(screens)],
             "frames": [s["name"] for s in screens],

@@ -566,22 +566,54 @@ def _nfr(prompt: str) -> dict[str, Any]:
     return {"nfrs": nfrs}
 
 
+# A screen is not a requirement. Naming a screen by truncating a requirement sentence gives you
+# "FEMA compliance: every trade must be tag" on a card in front of a CEO. Requirements are grouped
+# INTO screens by the journey stage they belong to, which is what a real designer does.
+_STAGE = [
+    ("Dashboard",     ("dashboard", "view", "list", "search", "report", "monitor", "retriev")),
+    ("Capture",       ("enter", "input", "capture", "submit", "book", "create", "raise", "initiat")),
+    ("Review",        ("quote", "rate", "price", "calculat", "review", "verify", "preview")),
+    ("Compliance",    ("fema", "kyc", "aml", "complian", "regulat", "rbi", "audit", "limit", "risk")),
+    ("Confirmation",  ("confirm", "approve", "authoris", "authoriz", "notify", "receipt", "settle")),
+]
+
+
+def _stage_for(r: dict) -> str:
+    text = f"{r.get('title','')} {r.get('statement','')}".lower()
+    for name, keys in _STAGE:
+        if any(k in text for k in keys):
+            return name
+    return "Dashboard"
+
+
 def _wireframe(prompt: str) -> dict[str, Any]:
     reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
     project = _project(prompt)
+
+    grouped: dict[str, list[dict]] = {}
+    for r in reqs:
+        grouped.setdefault(_stage_for(r), []).append(r)
+
     screens = []
-    for r in reqs[:5]:
+    for stage, _keys in _STAGE:                      # keep the journey in order
+        rs = grouped.get(stage)
+        if not rs:
+            continue
+        comps = [{"type": "AppBar", "label": f"{project} — {stage}", "props": {}}]
+        for r in rs[:4]:
+            kind = ("Table" if stage == "Dashboard" else
+                    "Banner" if stage == "Compliance" else
+                    "Card" if stage == "Review" else "Input")
+            comps.append({"type": kind, "label": r["title"][:44], "props": {"requirement": r["id"]}})
+        comps.append({"type": "PrimaryButton",
+                      "label": {"Dashboard": "Open", "Capture": "Submit", "Review": "Accept quote",
+                                "Compliance": "Acknowledge", "Confirmation": "Confirm"}[stage],
+                      "props": {}})
         screens.append({
-            "name": r["title"][:40],
-            "purpose": r["statement"][:140],
-            "components": [
-                {"type": "AppBar", "label": r["title"][:28], "props": {}},
-                {"type": "Form", "label": "Inputs derived from the requirement", "props": {"validation": "inline"}},
-                {"type": "PrimaryButton", "label": "Confirm", "props": {}},
-                {"type": "InlineAlert", "label": "Error and empty states",
-                 "props": {"visible_when": "validation fails or no data"}},
-            ],
-            "requirement_ids": [r["id"]],
+            "name": stage,
+            "purpose": rs[0]["statement"][:140],
+            "components": comps,
+            "requirement_ids": [r["id"] for r in rs[:4]],
         })
     if not screens:
         screens = [{"name": "Placeholder", "purpose": "No requirement available to derive a screen from.",
