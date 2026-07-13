@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import io
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from app.adapters.mcp import McpClient
@@ -99,6 +100,50 @@ class StitchAdapter:
 
         self.mcp = McpClient(url, headers=headers)
 
+    def _one_screen(self, project_id: str, sc: dict[str, Any], design_system: str) -> dict[str, Any]:
+        """Generate one screen and fetch its artifacts. Safe to run concurrently: no shared state."""
+        res = self.mcp.call(
+            TOOLS["generate_screen"],
+            {**_ids(project_id),
+             "prompt": _prompt_for(sc, design_system),
+             "device_type": _device_type(design_system)},
+            operation="generate_screen",
+        )
+        screen_id = _res_id(res, "screen")
+        if not screen_id:
+            progress.emit(
+                f"Stitch did not return a screen id for '{sc['name']}' — it said: {str(res)[:160]}",
+                level="warning",
+            )
+
+        html, shot = _artifacts(res)
+        if screen_id and not (html and shot):
+            try:
+                full = self.mcp.call(
+                    TOOLS["get_screen"], _ids(project_id, screen_id), operation="get_screen",
+                )
+                h2, s2 = _artifacts(full)
+                html, shot = html or h2, shot or s2
+                if not shot:
+                    shot = _inline_image(full)
+            except Exception as e:
+                log.warning("stitch.get_screen_failed", screen=sc["name"], error=str(e))
+
+        if not shot:
+            progress.emit(
+                f"Stitch returned no preview for '{sc['name']}'. Keys: "
+                f"{sorted({p.split('.')[0].split('[')[0] for p, _ in _walk(res)})[:8]}",
+                level="warning",
+            )
+
+        return {
+            "name": sc["name"], "screen_id": screen_id,
+            "screenshot_url": shot, "html_url": html,
+            "url": next((v for _, v in _walk(res)
+                         if v.startswith("https://stitch.withgoogle.com")), ""),
+            "requirement_ids": sc.get("requirement_ids", []),
+        }
+
     def list_tools(self, refresh: bool = False) -> dict[str, dict]:
         return self.mcp.list_tools(refresh=refresh)
 
@@ -142,65 +187,27 @@ class StitchAdapter:
             log.info("stitch.design_system_skipped", error=str(e)[:140],
                      note="screens will still generate — brand comes from the prompt instead")
 
-        out_screens: list[dict[str, Any]] = []
-        for sc in screens:
-            res = self.mcp.call(
-                TOOLS["generate_screen"],
-                {**_ids(project_id),
-                 "prompt": _prompt_for(sc, design_system),
-                 "device_type": _device_type(design_system)},
-                operation="generate_screen",
-            )
-            screen_id = _res_id(res, "screen")
-            if not screen_id:
-                progress.emit(
-                    f"Stitch did not return a screen id for '{sc['name']}' — it said: "
-                    f"{str(res)[:160]}", level="warning",
-                )
-
-            # Per the SDK: getHtml() and getImage() return DOWNLOAD URLS, not inline content.
-            html, shot = _artifacts(res)
-            if screen_id and not (html and shot):
-                # Generation may return only an id; the artifacts come from a second call.
+        # Stitch takes ~30-60s PER SCREEN. Six screens sequentially is four to six minutes, which
+        # during a demo is indistinguishable from a hang. They are independent calls, so run them in
+        # a small pool — bounded, because hammering a Google API with unlimited concurrency earns a
+        # 429 and we are back where we started.
+        out_screens: list[dict[str, Any]] = [None] * len(screens)  # type: ignore[list-item]
+        done = 0
+        with ThreadPoolExecutor(max_workers=min(4, len(screens) or 1)) as pool:
+            futures = {pool.submit(self._one_screen, project_id, sc, design_system): i
+                       for i, sc in enumerate(screens)}
+            for fut in as_completed(futures):
+                i = futures[fut]
                 try:
-                    full = self.mcp.call(
-                        TOOLS["get_screen"], _ids(project_id, screen_id), operation="get_screen",
-                    )
-                    h2, s2 = _artifacts(full)
-                    html, shot = html or h2, shot or s2
+                    out_screens[i] = fut.result()
                 except Exception as e:
-                    log.warning("stitch.get_screen_failed", screen=sc["name"], error=str(e))
-
-            # Still nothing? Ask for the image directly — this tool returns the PNG inline, base64.
-            if screen_id and not shot:
-                try:
-                    img = self.mcp.call(
-                        TOOLS["get_screen_image"], _ids(project_id, screen_id),
-                        operation="get_screen_image", fuzzy=False,
-                    )
-                    shot = _inline_image(img) or _artifacts(img)[1]
-                except Exception as e:
-                    log.warning("stitch.get_image_failed", screen=sc["name"], error=str(e))
-
-            if not shot:
-                # Say what actually came back, on the run timeline, instead of rendering an empty
-                # box and leaving someone to guess. Three rounds of guessing is enough.
-                progress.emit(
-                    f"Stitch returned no preview for '{sc['name']}'. Response keys: "
-                    f"{sorted({p.split('.')[0].split('[')[0] for p, _ in _walk(res)})[:8]}",
-                    level="warning",
-                )
-
-            out_screens.append({
-                "name": sc["name"], "screen_id": screen_id,
-                "screenshot_url": shot,      # a download URL for the PNG
-                "html_url": html,            # a download URL for the HTML
-                # Only link where Stitch told us to. A hand-built URL that 404s is worse than no
-                # link — it makes a working integration look broken.
-                "url": next((v for _, v in _walk(res)
-                             if v.startswith("https://stitch.withgoogle.com")), ""),
-                "requirement_ids": sc.get("requirement_ids", []),
-            })
+                    log.error("stitch.screen_failed", screen=screens[i]["name"], error=str(e))
+                    out_screens[i] = {"name": screens[i]["name"], "screen_id": "",
+                                      "screenshot_url": "", "html_url": "", "url": "",
+                                      "error": str(e)[:200],
+                                      "requirement_ids": screens[i].get("requirement_ids", [])}
+                done += 1
+                progress.emit(f"Stitch: {done}/{len(screens)} screens generated.")
 
         return {
             "provider": "stitch",

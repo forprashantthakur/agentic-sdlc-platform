@@ -427,10 +427,16 @@ export function Integrations() {
           <Layers className="h-4 w-4 text-brand" />
           <CardTitle>Stitch diagnostics</CardTitle>
           <Button size="sm" variant="secondary" className="ml-auto" onClick={runProbe} loading={probing}>
-            Test Stitch
+            {probing ? 'Generating a screen…' : 'Test Stitch'}
           </Button>
         </CardHeader>
         <CardBody>
+          {probing && (
+            <p className="mb-3 rounded-lg bg-brand-soft px-3 py-2 text-[12px] text-brand">
+              Stitch takes 30–60 seconds to draw a screen. This is not a hang — the spinner stays until
+              it answers.
+            </p>
+          )}
           <p className="text-[12px] text-muted">
             Generates one throwaway screen and prints exactly what Stitch sends back — the tools it
             exposes, the raw responses, and whether an image was found by either route (a download URL

@@ -217,10 +217,22 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
             flat[prefix] = (v[:70] + "…") if len(v) > 70 else v
         return flat
 
+    import time as _time
+
     out: dict[str, Any] = {"server": settings.stitch_mcp_url}
+    timings: dict[str, str] = {}
+    out["timings_s"] = timings
+    t0 = _time.perf_counter()
+
+    def lap(step: str) -> None:
+        nonlocal t0
+        timings[step] = f"{_time.perf_counter() - t0:.1f}"
+        t0 = _time.perf_counter()
+
     try:
         project = adapter.mcp.call(TOOLS["create_project"], {"title": "Probe"},
                                    operation="create_project")
+        lap("create_project")
         out["create_project_raw"] = project
         pid = _res_id(project, "project")
         out["parsed_project_id"] = pid or "EMPTY — this is the bug: no screen can be generated"
@@ -240,6 +252,7 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
                 adapter.mcp.resolve(TOOLS["get_screen"], "get_screen") or ""
             ).get("properties") or {}).keys()
         )
+        lap("generate_screen")
         out["generate_screen_raw"] = gen
         sid = _res_id(gen, "screen")
         out["parsed_screen_id"] = sid or "EMPTY"
@@ -251,23 +264,26 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
                 out["get_screen_raw"] = adapter.mcp.call(
                     TOOLS["get_screen"], _ids(pid, sid), operation="get_screen",
                 )
+                lap("get_screen")
             except Exception as e:
                 out["get_screen_error"] = f"{type(e).__name__}: {e}"
 
-            # The other contract: the PNG itself, base64, in an MCP image block. A base64 block
-            # contains no "http" string, so the URL walker discards it in silence — which is exactly
-            # how five screens generated correctly and every preview came back empty.
-            try:
-                img = adapter.mcp.call(
-                    TOOLS["get_screen_image"], _ids(pid, sid),
-                    operation="get_screen_image", fuzzy=False,
-                )
-                out["get_screen_image_keys"] = sorted(img.keys())
-                inline = _inline_image(img)
-                out["get_screen_image_inline"] = (inline[:64] + "…") if inline else None
-            except Exception as e:
-                out["get_screen_image_error"] = f"{type(e).__name__}: {e}"
-                inline = ""
+            # This server exposes no get_screen_image tool (see the tool list). Only try it if it
+            # is actually there — a round trip to be told "no such tool" is a round trip wasted, and
+            # this probe is already slow enough to look like a hang.
+            inline = ""
+            if any("image" in t for t in adapter.mcp.list_tools()):
+                try:
+                    img = adapter.mcp.call(
+                        TOOLS["get_screen_image"], _ids(pid, sid),
+                        operation="get_screen_image", fuzzy=False,
+                    )
+                    inline = _inline_image(img)
+                    out["get_screen_image_keys"] = sorted(img.keys())
+                except Exception as e:
+                    out["get_screen_image_error"] = f"{type(e).__name__}: {e}"
+            else:
+                out["get_screen_image"] = "not exposed by this server — get_screen is the only route"
 
         # LEAD with the map. The raw payloads go last, where they can scroll away harmlessly.
         out["KEY_MAP_generate_screen"] = paths(gen)
