@@ -34,12 +34,40 @@ def checkpointer():
     if settings.db_url.startswith("postgresql"):
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
+            from psycopg_pool import ConnectionPool
 
             dsn = settings.db_url.replace("postgresql+psycopg", "postgresql")
-            with PostgresSaver.from_conn_string(dsn) as cp:
+
+            # A POOL, not a single connection — and this is not a preference, it is a correctness
+            # requirement the moment the graph fans out.
+            #
+            # `PostgresSaver.from_conn_string()` hands the graph one connection inside one
+            # transaction. That was harmless while the agents ran strictly one at a time. Now that
+            # Agent 3 and Agent 4 execute concurrently, they write their checkpoints from two worker
+            # threads: they would serialise onto that single connection, share its transaction, and
+            # if either write failed the transaction would enter an aborted state and take the other
+            # branch down with it — a failure that CANNOT reproduce on SQLite, and so would only
+            # ever have surfaced in production.
+            #
+            # autocommit=True: each checkpoint write stands alone, so one branch can never poison
+            # the other's transaction.
+            # prepare_threshold=0: pooled connections must not accumulate prepared statements keyed
+            # to a connection they may not be reused on.
+            pool = ConnectionPool(
+                conninfo=dsn,
+                min_size=1,
+                max_size=settings.checkpointer_pool_size,
+                open=True,
+                timeout=30.0,
+                kwargs={"autocommit": True, "prepare_threshold": 0},
+            )
+            try:
+                cp = PostgresSaver(pool)
                 cp.setup()
                 yield cp
                 return
+            finally:
+                pool.close()
         except Exception as e:  # pragma: no cover - infra dependent
             log.warning("checkpointer.postgres_unavailable", error=str(e))
 

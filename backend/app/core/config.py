@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # should derive from approved REQUIREMENTS, not from a picture. Set false to restore the old
     # sequential behaviour exactly.
     parallel_wireframes: bool = True
+    # Must exceed the widest fan-out in the graph (currently 2) with headroom for the runner
+    # thread and any concurrent run. Under-sizing this does not error — it silently serialises
+    # the parallelism you paid for.
+    checkpointer_pool_size: int = 8
 
     # Exact-hash response cache (NOT semantic — see llm/cache.py for why that would be dangerous).
     llm_cache_enabled: bool = True
