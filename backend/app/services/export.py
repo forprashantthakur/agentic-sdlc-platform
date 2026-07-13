@@ -15,12 +15,14 @@ so parsing it is safe in a way that parsing arbitrary markdown would not be.
 
 from __future__ import annotations
 
+import base64
 import io
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from app.core.logging import log
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -69,9 +71,51 @@ class Block:
 
 INLINE_RE = re.compile(r"\*\*(.+?)\*\*|_(.+?)_|`(.+?)`")
 
+# ![alt](src) — the wireframe screenshots. These live INSIDE table cells, which is why they were
+# invisible in both exports: the cell text was escaped, so the reader got the literal characters
+# "![Dashboard](data:image/png;base64,iVBOR..." or, more often, nothing at all.
+IMG_RE = re.compile(r"!\[([^\]]*)\]\((?P<src>data:image/[^)\s]+|https?://[^)\s]+)\)")
+
+
+def image_src(cell: str) -> str | None:
+    """The image source in this cell, if the cell IS an image."""
+    m = IMG_RE.search(cell or "")
+    return m.group("src") if m else None
+
+
+def image_bytes(src: str) -> bytes | None:
+    """Raw bytes for a data: URI, or a fetched http(s) image.
+
+    Word needs actual BYTES — it cannot follow a URL and it cannot read SVG. PDF is more forgiving,
+    but giving both the same bytes means one behaviour to reason about instead of two.
+    """
+    if src.startswith("data:"):
+        head, _, b64 = src.partition(",")
+        if "svg" in head:
+            return None                    # python-docx cannot embed SVG. Do not pretend otherwise.
+        try:
+            return base64.b64decode(b64)
+        except Exception:
+            return None
+    try:                                   # a real Stitch download URL
+        import httpx
+
+        r = httpx.get(src, timeout=15.0, follow_redirects=True)
+        r.raise_for_status()
+        return r.content
+    except Exception as e:
+        log.warning("export.image_fetch_failed", src=src[:60], error=str(e))
+        return None
+
 
 def strip_inline(s: str) -> str:
-    """Word and PDF get their emphasis from styles, not from asterisks."""
+    """Word and PDF get their emphasis from styles, not from asterisks.
+
+    Image syntax is left intact: the exporters need to recognise it and embed the picture, and a
+    base64 payload must never be run through the emphasis regex.
+    """
+    if IMG_RE.search(s or ""):
+        return s
     return INLINE_RE.sub(lambda m: m.group(1) or m.group(2) or m.group(3), s).replace("<br>", "\n")
 
 
@@ -141,7 +185,10 @@ def _docx_blocks(doc: Document, blocks: list[Block]) -> None:
             for run in h.runs:
                 run.font.color.rgb = NAVY
         elif b.kind == "p":
-            doc.add_paragraph(b.text)
+            if (src := image_src(b.text)) and (raw := image_bytes(src)):
+                doc.add_paragraph().add_run().add_picture(io.BytesIO(raw), width=Inches(5.4))
+            else:
+                doc.add_paragraph(b.text)
         elif b.kind == "ul":
             for it in b.items:
                 doc.add_paragraph(it, style="List Bullet")
@@ -164,7 +211,12 @@ def _docx_blocks(doc: Document, blocks: list[Block]) -> None:
                 cells = t.add_row().cells
                 for j, val in enumerate(row[: len(b.headers)]):
                     cells[j].text = ""
-                    r = cells[j].paragraphs[0].add_run(val)
+                    para = cells[j].paragraphs[0]
+                    if (src := image_src(val)) and (raw := image_bytes(src)):
+                        # The wireframe itself, in the cell. This is the whole point of the export.
+                        para.add_run().add_picture(io.BytesIO(raw), width=Inches(2.6))
+                        continue
+                    r = para.add_run(val)
                     r.font.size = Pt(9)
 
 
@@ -259,6 +311,8 @@ def to_docx(versions: list[ArtifactVersion], *, project_name: str, pack: bool = 
 
 # ──────────────────────────────────── PDF ─────────────────────────────────────
 CSS = """
+img.shot { width: 260px; border: 1px solid #DCE4EE; border-radius: 4px; }
+img.shot.wide { width: 480px; }
 @page { size: A4; margin: 20mm 16mm 18mm 16mm;
   @bottom-center { content: "HDFC Bank · Agentic SDLC Platform · Page " counter(page) " of " counter(pages);
                    font-size: 7.5pt; color: #6b7a90; font-family: Helvetica, Arial, sans-serif; } }
@@ -298,14 +352,21 @@ def _blocks_to_html(blocks: list[Block]) -> str:
         if b.kind in ("h1", "h2", "h3"):
             out.append(f"<{b.kind}>{_html_esc(b.text)}</{b.kind}>")
         elif b.kind == "p":
-            out.append(f"<p>{_html_esc(b.text)}</p>")
+            if src := image_src(b.text):
+                out.append(f'<p><img class="shot wide" src="{src}"/></p>')
+            else:
+                out.append(f"<p>{_html_esc(b.text)}</p>")
         elif b.kind in ("ul", "ol"):
             items = "".join(f"<li>{_html_esc(i)}</li>" for i in b.items)
             out.append(f"<{b.kind}>{items}</{b.kind}>")
         elif b.kind == "table" and b.headers:
             head = "".join(f"<th>{_html_esc(h)}</th>" for h in b.headers)
             body = "".join(
-                "<tr>" + "".join(f"<td>{_html_esc(c)}</td>" for c in r[: len(b.headers)]) + "</tr>"
+                "<tr>" + "".join(
+                    (f'<td><img class="shot" src="{image_src(c)}"/></td>' if image_src(c)
+                     else f"<td>{_html_esc(c)}</td>")
+                    for c in r[: len(b.headers)]
+                ) + "</tr>"
                 for r in b.rows
             )
             out.append(f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>")

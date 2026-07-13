@@ -19,6 +19,7 @@ consumes downstream — is produced regardless, and the screens are marked pendi
 from __future__ import annotations
 
 import base64
+import io
 import uuid
 from typing import Any
 
@@ -309,43 +310,45 @@ def _esc(t: str) -> str:
     return (t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def render_wireframe_svg(screen: dict[str, Any], brand: str = "#004C8F") -> str:
-    """Draw the screen spec as an SVG wireframe and return it as a data: URI."""
-    comps = (screen.get("components") or [])[:9]
-    W, H = 520, 360
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">',
-        f'<rect width="{W}" height="{H}" fill="#FFFFFF"/>',
-        f'<rect x="0" y="0" width="{W}" height="34" fill="{brand}"/>',
-        f'<text x="14" y="22" font-family="Inter,Arial" font-size="12" fill="#FFFFFF" '
-        f'font-weight="600">{_esc(screen.get("name", "Screen"))}</text>',
-        f'<rect x="0" y="34" width="86" height="{H - 34}" fill="#F4F7FB"/>',
-    ]
-    for i in range(5):                                   # left nav rails
-        parts.append(f'<rect x="12" y="{50 + i * 22}" width="62" height="8" rx="4" fill="#DCE4EE"/>')
+def render_wireframe_png(screen: dict[str, Any], brand: tuple = (0, 76, 143)) -> str:
+    """Draw the screen spec as a PNG wireframe and return it as a data: URI.
+
+    PNG, not SVG, and that is not an aesthetic choice: python-docx cannot embed SVG at all, so an
+    SVG wireframe renders in the browser and then silently vanishes from the Word export. PNG is the
+    one format the browser, WeasyPrint and Word all accept — and it is what real Stitch returns, so
+    the offline and live paths converge on a single code path instead of two.
+    """
+    from PIL import Image, ImageDraw
+
+    W, H, S = 520, 360, 2                       # 2x supersample -> crisp text when scaled down
+    img = Image.new("RGB", (W * S, H * S), "white")
+    d = ImageDraw.Draw(img)
+
+    d.rectangle([0, 0, W * S, 34 * S], fill=brand)
+    d.text((14 * S, 11 * S), str(screen.get("name", "Screen"))[:40], fill="white")
+    d.rectangle([0, 34 * S, 86 * S, H * S], fill="#F4F7FB")
+    for i in range(5):
+        d.rounded_rectangle([12 * S, (50 + i * 22) * S, 74 * S, (58 + i * 22) * S], radius=4 * S,
+                            fill="#DCE4EE")
 
     y = 50
-    for c in comps:
+    for c in (screen.get("components") or [])[:9]:
         ctype = str(c.get("type", "")).lower()
-        label = _esc(str(c.get("label", ""))[:44])
+        label = str(c.get("label", ""))[:52]
         fill, stroke = next((v for k, v in _FILL.items() if k in ctype), ("#F8FAFC", "#DCE4EE"))
-        is_btn = fill == "#004C8F"
         h = 44 if any(k in ctype for k in ("table", "list", "chart", "card")) else 26
         if y + h > H - 12:
             break
-        parts.append(
-            f'<rect x="100" y="{y}" width="{W - 116}" height="{h}" rx="5" fill="{fill}" '
-            f'stroke="{stroke}" stroke-width="1"/>'
-        )
-        parts.append(
-            f'<text x="110" y="{y + (h // 2) + 4}" font-family="Inter,Arial" font-size="10" '
-            f'fill="{"#FFFFFF" if is_btn else "#4A5A6B"}">{label}</text>'
-        )
+        d.rounded_rectangle([100 * S, y * S, (W - 16) * S, (y + h) * S], radius=5 * S,
+                            fill=fill, outline=stroke, width=S)
+        d.text((110 * S, (y + h // 2 - 5) * S), label,
+               fill="white" if fill == "#004C8F" else "#4A5A6B")
         y += h + 10
 
-    parts.append('</svg>')
-    svg = "".join(parts)
-    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+    img = img.resize((W, H), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 class MockStitchAdapter:
@@ -363,7 +366,7 @@ class MockStitchAdapter:
                 # A REAL wireframe, drawn from Agent 3's own component spec. Previously this was a
                 # link to example.invalid, which 404s by design — honest, but it rendered as an
                 # empty grey box, which is the last thing you want on a projector.
-                "screenshot_url": render_wireframe_svg(s),
+                "screenshot_url": render_wireframe_png(s),
                 "html_url": "",
                 "url": "",
                 "rendered_offline": True,
