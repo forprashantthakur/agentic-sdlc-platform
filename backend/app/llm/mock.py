@@ -566,6 +566,191 @@ def _nfr(prompt: str) -> dict[str, Any]:
     return {"nfrs": nfrs}
 
 
+
+
+# ── Curated demo wireframes ───────────────────────────────────────────────────────────────────
+# Five seeded projects, five real screen flows. Hand-authored because a generic
+# Dashboard/Capture/Review skeleton is defensible for an unknown project and embarrassing for a
+# known one: a Corporate FX portal needs a deal blotter and a FEMA declaration, not "Capture".
+#
+# `match` keywords are NOT decoration. Requirement IDs are resolved at run time by matching these
+# against the requirements Agent 1 ACTUALLY extracted from that project's documents. Hardcoding
+# BR-004 would produce a traceability table that looks perfect and cites a requirement that may not
+# exist — the precise failure this platform is meant to prevent.
+DEMO_WIREFRAMES: dict[str, list[dict[str, Any]]] = {
+    "upi autopay": [
+        {"name": "Mandate Dashboard", "purpose": "All active UPI AutoPay mandates for the customer, with next debit date and cap.",
+         "match": ("view", "list", "dashboard", "active", "visib", "data must remain"),
+         "components": [("Table", "Active mandates — merchant, cap, frequency, next debit"),
+                        ("Card", "Total committed this month"),
+                        ("Input", "Search by merchant"),
+                        ("PrimaryButton", "Create new mandate")]},
+        {"name": "Create Mandate", "purpose": "Self-service mandate creation without the merchant's involvement.",
+         "match": ("create", "retail", "self-service", "merchant", "without"),
+         "components": [("Input", "Merchant / biller"),
+                        ("Input", "Maximum debit amount (cap)"),
+                        ("Input", "Frequency — monthly / quarterly"),
+                        ("Input", "Valid until"),
+                        ("PrimaryButton", "Continue to authentication")]},
+        {"name": "AFA Authentication", "purpose": "Additional Factor of Authentication — mandatory on every mandate execution.",
+         "match": ("additional factor", "afa", "authenticat", "every execution"),
+         "components": [("Banner", "AFA is mandatory for every mandate execution (NPCI)"),
+                        ("Input", "UPI PIN"),
+                        ("PrimaryButton", "Authorise mandate")]},
+        {"name": "Pre-debit Notification", "purpose": "The 24-hour pre-debit notice the regulator requires.",
+         "match": ("pre-debit", "notification", "24", "notif", "told"),
+         "components": [("Banner", "Customer notified 24h before every debit — hard requirement"),
+                        ("Table", "Upcoming debits in the next 7 days"),
+                        ("PrimaryButton", "Acknowledge")]},
+        {"name": "Pause / Cancel Mandate", "purpose": "Pause, modify or revoke a mandate without calling the branch.",
+         "match": ("pause", "cancel", "revoke", "modify", "stop"),
+         "components": [("Card", "Mandate — Netflix, INR 649, monthly"),
+                        ("Input", "Reason (optional)"),
+                        ("PrimaryButton", "Pause mandate"),
+                        ("Alert", "Paused mandates resume only on customer action")]},
+    ],
+    "corporate fx": [
+        {"name": "Deal Blotter", "purpose": "Every FX deal booked by the corporate, retrievable for 10 years.",
+         "match": ("retriev", "10 year", "audit", "record", "view", "report"),
+         "components": [("Table", "Deals — pair, notional, tenor, rate, status"),
+                        ("Input", "Filter by counterparty / date"),
+                        ("Chart", "Exposure by currency pair"),
+                        ("PrimaryButton", "New booking")]},
+        {"name": "Rate Request", "purpose": "Corporate treasurer requests a live rate for a currency pair and tenor.",
+         "match": ("book", "request", "initiat", "create", "enter", "treasur"),
+         "components": [("Input", "Currency pair — USD/INR"),
+                        ("Input", "Notional amount"),
+                        ("Input", "Value date / tenor"),
+                        ("PrimaryButton", "Request live quote")]},
+        {"name": "Quote Review", "purpose": "Dealer quotes with spread, valid for a countdown window.",
+         "match": ("quote", "rate", "spread", "price", "dealer", "review"),
+         "components": [("Card", "Best quote — 83.4150, valid 12s"),
+                        ("Table", "Competing dealer quotes and spreads"),
+                        ("Alert", "Quote expires — re-request after countdown"),
+                        ("PrimaryButton", "Accept quote")]},
+        {"name": "FEMA Declaration", "purpose": "Every trade tagged with an FEMA purpose code before it can settle.",
+         "match": ("fema", "declaration", "purpose code", "complian", "regulat", "tag"),
+         "components": [("Banner", "FEMA: every trade must carry a purpose code"),
+                        ("Input", "Purpose code"),
+                        ("Input", "Underlying document reference"),
+                        ("PrimaryButton", "Submit declaration")]},
+        {"name": "Limit & Risk Check", "purpose": "Deals above the threshold escalate to Market Risk before booking.",
+         "match": ("limit", "risk", "escalat", "threshold", "above", "usd 1"),
+         "components": [("Banner", "Deal exceeds threshold — Market Risk approval required"),
+                        ("Card", "Utilised limit vs sanctioned limit"),
+                        ("PrimaryButton", "Send to Market Risk")]},
+        {"name": "Booking Confirmation", "purpose": "Deal slip, settlement instructions and audit reference.",
+         "match": ("confirm", "settle", "slip", "receipt", "book"),
+         "components": [("Card", "Deal booked — reference FX-2026-00841"),
+                        ("Table", "Settlement instructions"),
+                        ("PrimaryButton", "Download deal slip")]},
+    ],
+    "v-kyc": [
+        {"name": "Application Start", "purpose": "Aadhaar and PAN capture — the top of the account-opening funnel.",
+         "match": ("kyc", "rbi", "master direction", "aadhaar", "pan", "identity", "open", "capture"),
+         "components": [("Input", "Mobile number"), ("Input", "PAN"), ("Input", "Aadhaar (masked)"),
+                        ("Banner", "Consent — DPDP Act notice"),
+                        ("PrimaryButton", "Begin application")]},
+        {"name": "Document Upload", "purpose": "Proof of address and income, with quality checks before submission.",
+         "match": ("document", "upload", "proof", "attack", "forged", "certified", "address"),
+         "components": [("Input", "Upload proof of address"), ("Input", "Upload income proof"),
+                        ("Alert", "Blurred or cropped images are rejected at V-CIP — check before submitting"),
+                        ("PrimaryButton", "Submit documents")]},
+        {"name": "V-CIP Queue", "purpose": "Live queue position and wait time — the 11-minute wait is the drop-off driver.",
+         "match": ("wait", "queue", "agent", "volume", "spiky", "capacity", "v-cip", "vcip"),
+         "components": [("Card", "Estimated wait — 2 min 40 s"),
+                        ("Chart", "Queue depth by hour"),
+                        ("Banner", "Target: V-CIP wait under 3 minutes"),
+                        ("PrimaryButton", "Join video call")]},
+        {"name": "Video KYC Session", "purpose": "Live agent V-CIP with liveness, geo-tagging and recording.",
+         "match": ("liveness", "attack", "certified", "vendor", "video", "v-cip", "session"),
+         "components": [("Card", "Live agent — recording, geo-tagged"),
+                        ("Banner", "Session recorded and retained per RBI V-CIP norms"),
+                        ("PrimaryButton", "Complete verification")]},
+        {"name": "Account Activated", "purpose": "Account number, welcome kit and first-funding nudge.",
+         "match": ("activat", "complete", "account", "casa", "welcome", "end-to-end"),
+         "components": [("Card", "Account active — opened in 9 min 12 s"),
+                        ("Table", "Account number, IFSC, customer ID"),
+                        ("PrimaryButton", "Fund your account")]},
+    ],
+    "dispute": [
+        {"name": "Dispute Dashboard", "purpose": "Status of every raised dispute — the screen that removes 60% of status calls.",
+         "match": ("queue", "status", "track", "dashboard", "review", "dispute"),
+         "components": [("Table", "Disputes — txn, amount, stage, TAT clock"),
+                        ("Card", "Provisional credit — expected in 2 days"),
+                        ("PrimaryButton", "Raise new dispute")]},
+        {"name": "Raise Dispute", "purpose": "Pick the transaction, choose a reason code, raise digitally.",
+         "match": ("raise", "claim", "fraud claim", "service dispute", "transaction", "digital"),
+         "components": [("Table", "Recent card transactions — select one"),
+                        ("Input", "Reason code — fraud / duplicate / not received"),
+                        ("Input", "Describe what happened"),
+                        ("PrimaryButton", "Raise dispute")]},
+        {"name": "Evidence Upload", "purpose": "Customer evidence attached at source, so the analyst never chases it.",
+         "match": ("evidence", "representment", "review", "upload", "attach"),
+         "components": [("Input", "Upload receipt / merchant communication"),
+                        ("Alert", "Missing evidence is the single biggest cause of TAT breach"),
+                        ("PrimaryButton", "Attach and continue")]},
+        {"name": "Provisional Credit", "purpose": "The 3-working-day provisional credit clock, visible to the customer.",
+         "match": ("immediately", "credit", "provisional", "auto-approve", "tat", "compensation"),
+         "components": [("Banner", "Provisional credit due within 3 working days — TAT breach triggers compensation"),
+                        ("Card", "INR 12,400 credited provisionally"),
+                        ("PrimaryButton", "View credit")]},
+        {"name": "Resolution", "purpose": "Chargeback outcome, final credit or reversal, with reasoning.",
+         "match": ("fraud", "resolv", "outcome", "chargeback", "approve", "recover"),
+         "components": [("Card", "Dispute resolved in your favour"),
+                        ("Table", "Chargeback trail and network reference"),
+                        ("PrimaryButton", "Download resolution letter")]},
+    ],
+    "aml": [
+        {"name": "Alert Queue", "purpose": "The alert backlog — 11,000 down to zero is the programme's headline.",
+         "match": ("backlog", "alert", "queue", "volume", "11,000", "false positive"),
+         "components": [("Table", "Alerts — customer, scenario, risk score, age"),
+                        ("Chart", "Backlog burn-down"),
+                        ("Input", "Filter by scenario / risk band"),
+                        ("PrimaryButton", "Open alert")]},
+        {"name": "Alert Triage", "purpose": "Analyst disposition with the evidence assembled on one screen.",
+         "match": ("triage", "analyst", "investigat", "disposit", "review", "fte"),
+         "components": [("Card", "Alert AML-2026-88214 — score 74"),
+                        ("Table", "Triggering transactions"),
+                        ("Input", "Disposition — close / escalate"),
+                        ("PrimaryButton", "Save disposition")]},
+        {"name": "Customer Risk 360", "purpose": "Everything known about the customer, so triage is not done blind.",
+         "match": ("customer", "risk", "profile", "360", "history", "kyc"),
+         "components": [("Card", "Risk band — High"),
+                        ("Chart", "Transaction pattern vs peer group"),
+                        ("Table", "Linked parties and prior alerts")]},
+        {"name": "Model Tuning", "purpose": "Threshold changes with a false-positive/true-positive impact preview.",
+         "match": ("model", "threshold", "tun", "false-positive", "true positive", "missed"),
+         "components": [("Banner", "No threshold change may reduce true positives — CCO red line"),
+                        ("Input", "Scenario threshold"),
+                        ("Chart", "Simulated FP reduction vs TP retained"),
+                        ("PrimaryButton", "Submit for CCO approval")]},
+        {"name": "STR Filing", "purpose": "Suspicious Transaction Report to FIU-IND, with the audit trail attached.",
+         "match": ("str", "fiu", "report", "regulat", "audit", "aud-2026", "file"),
+         "components": [("Banner", "Audit finding AUD-2026-114 — filing trail is evidence"),
+                        ("Input", "STR narrative"),
+                        ("Table", "Attached transactions and analyst trail"),
+                        ("PrimaryButton", "File STR")]},
+    ],
+}
+
+
+def _demo_screens(project: str) -> list[dict[str, Any]] | None:
+    p = (project or "").lower()
+    for key, screens in DEMO_WIREFRAMES.items():
+        if key in p:
+            return screens
+    return None
+
+
+def _match_reqs(screen: dict[str, Any], reqs: list[dict]) -> list[str]:
+    """Trace this screen to the requirements it actually serves — by reading them, not by guessing."""
+    keys = screen.get("match", ())
+    ids = [r["id"] for r in reqs
+           if any(k in f"{r.get('title','')} {r.get('statement','')}".lower() for k in keys)]
+    return ids[:4]
+
+
 # A screen is not a requirement. Naming a screen by truncating a requirement sentence gives you
 # "FEMA compliance: every trade must be tag" on a card in front of a CEO. Requirements are grouped
 # INTO screens by the journey stage they belong to, which is what a real designer does.
@@ -589,6 +774,42 @@ def _stage_for(r: dict) -> str:
 def _wireframe(prompt: str) -> dict[str, Any]:
     reqs = _parse_json_from_prompt(prompt, "requirements").get("requirements", [])
     project = _project(prompt)
+
+    if curated := _demo_screens(project):
+        screens = []
+        for sc in curated:
+            ids = _match_reqs(sc, reqs)
+            if not ids:
+                # A screen that traces to NO requirement is exactly the defect this platform exists
+                # to catch. Do not ship it as if it were justified — drop it, and let the coverage
+                # check below account for anything left over.
+                continue
+            screens.append({
+                "name": sc["name"],
+                "purpose": sc["purpose"],
+                "components": [{"type": t, "label": l, "props": {"requirement": ids[0]}}
+                               for t, l in sc["components"]],
+                "requirement_ids": ids,
+            })
+
+        # And the converse: a requirement that appears on NO screen is an uncovered requirement.
+        # Say so on a screen of its own rather than quietly losing it between the BRD and the UI.
+        covered = {i for sc in screens for i in sc["requirement_ids"]}
+        orphans = [r for r in reqs if r["id"] not in covered]
+        if orphans:
+            screens.append({
+                "name": "Uncovered Requirements",
+                "purpose": "Requirements with no screen yet — surfaced, not hidden.",
+                "components": [{"type": "Alert", "label": r["title"][:46],
+                                "props": {"requirement": r["id"]}} for r in orphans[:6]],
+                "requirement_ids": [r["id"] for r in orphans],
+            })
+
+        return {"screens": screens,
+                "flow": " → ".join(x["name"] for x in screens),
+                "design_system": "HDFC Bank DS — Inter, #004C8F",
+                "notes": (f"Screen flow for {project}. Every screen traces to at least one extracted "
+                          f"requirement; any requirement without a screen is listed explicitly.")}
 
     grouped: dict[str, list[dict]] = {}
     for r in reqs:
