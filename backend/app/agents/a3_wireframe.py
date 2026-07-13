@@ -96,10 +96,20 @@ class WireframeAgent(BaseAgent):
                            else f"Initial wireframe spec + {settings.wireframe_provider} screens",
             external_ref=link,
         )
+        n = len(spec.get("screens", []))
+        if external.get("mock"):
+            note = (f"{n} screen specs · {settings.wireframe_provider} was MOCKED — no screens were "
+                    "generated. Set STITCH_API_KEY and STITCH_MOCK=false.")
+        elif external.get("error") or spec["wireframes"].get("error"):
+            note = (f"{n} screen specs · screens PENDING: "
+                    f"{spec['wireframes'].get('error', 'provider unavailable')[:90]}")
+        else:
+            rendered = sum(1 for sc in external.get("screens", []) if sc.get("screenshot_url"))
+            note = f"{n} screens · {rendered} rendered by {settings.wireframe_provider} → {link or '—'}"
+
         return AgentResult(
             artifacts={ArtifactType.WIREFRAME.value: v.id},
             payloads={ArtifactType.WIREFRAME.value: spec},
             external=external,
-            notes=(f"{len(spec.get('screens', []))} screens → "
-                   f"{settings.wireframe_provider}: {link or 'pending'}"),
+            notes=note,
         )

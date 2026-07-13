@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { cn, fmtDateTime } from '../../lib/utils'
 import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Empty, useToast } from '../../components/ui'
 import { mdToHtml, toc } from '../../lib/md'
+import Wireframes from '../../components/Wireframes'
 
 const ORDER = ['BRD', 'FRD', 'SRS', 'CONCEPT_NOTE', 'BUSINESS_REQUIREMENTS', 'WIREFRAME',
   'USER_STORIES', 'ACCEPTANCE_CRITERIA', 'API_REQUIREMENTS', 'NFR', 'SPRINT_PLAN']
@@ -137,6 +138,11 @@ export default function GenerateBrd({ project, onBack }) {
                 <p className="mb-4 rounded-lg border-l-2 border-brand bg-brand-soft px-3 py-2 text-[12px] text-brand">
                   {version.change_summary}
                 </p>
+              )}
+              {active.type === 'WIREFRAME' && !showDiff && (
+                <div className="mb-6">
+                  <Wireframes payload={version.payload} />
+                </div>
               )}
               {showDiff && diff ? (
                 <pre className="overflow-x-auto rounded-xl bg-ink p-4 font-mono text-[11.5px] leading-relaxed text-bg">

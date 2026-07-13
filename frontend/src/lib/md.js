@@ -12,6 +12,11 @@ const inline = (s) =>
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/_([^_]+)_/g, '<em>$1</em>')
+    // Images BEFORE links — otherwise the link rule eats ![alt](src) and leaves a stray "!".
+    // That bug meant every Stitch screenshot rendered as a broken-looking hyperlink instead of a
+    // picture, so a working wireframe generator looked like a broken one.
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
+      '<img src="$2" alt="$1" loading="lazy" class="max-h-64 rounded-lg border border-line" />')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
     .replace(/&lt;br&gt;/g, '<br>')
 
