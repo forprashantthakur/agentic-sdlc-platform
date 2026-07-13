@@ -8,6 +8,17 @@ def merge(a: dict, b: dict) -> dict:
     return {**(a or {}), **(b or {})}
 
 
+def last(a, b):
+    """Last writer wins.
+
+    Required the moment two nodes run concurrently: LangGraph refuses to merge two writes to the
+    same key in one step unless you tell it how. Agent 3 and Agent 4 now finish in the same
+    superstep and both report status — without this, the graph raises
+    "Can receive only one value per step", which is LangGraph correctly refusing to guess.
+    """
+    return b if b is not None else a
+
+
 class SDLCState(TypedDict, total=False):
     # identity
     project_id: str
@@ -29,8 +40,8 @@ class SDLCState(TypedDict, total=False):
 
     # observability
     trace: Annotated[list[dict[str, Any]], operator.add]
-    status: str
-    error: str
+    status: Annotated[str, last]
+    error: Annotated[str, last]
 
 
 MAX_REVISIONS = 3  # a gate that loops forever is a stuck programme, not a feature

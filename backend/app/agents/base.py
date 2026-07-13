@@ -73,16 +73,16 @@ class BaseAgent:
         llm, model = llm_for(self.id)
         log.info("agent.generate", agent=self.id, task=task, run=self.ctx.run_id,
                  model=model or llm.model_name)
-        kwargs: dict = {}
+        kwargs: dict = {"project_id": self.ctx.project_id, "agent": self.id}
         think = (settings.agent_thinking or {}).get(self.id)
-        if think is not None and hasattr(llm, "generate_json"):
+        if think is not None:
             kwargs["thinking"] = think
         try:
             return llm.generate_json(
                 system=BANK_SYSTEM, prompt=prompt, schema=schema, task=task,
                 model=model, temperature=temperature, **kwargs,
             )
-        except TypeError:      # a provider that does not take `thinking` (Anthropic)
+        except TypeError:      # a provider without these kwargs (Anthropic)
             return llm.generate_json(
                 system=BANK_SYSTEM, prompt=prompt, schema=schema, task=task,
                 model=model, temperature=temperature,

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters import registry
 from app.api import (
-    approvals, artifacts, copilot, dashboard, integrations, memory, projects, runs,
+    approvals, artifacts, copilot, dashboard, integrations, memory, metrics, projects, runs,
 )
 from app.core.config import settings
 from app.core.db import init_db
@@ -47,6 +47,7 @@ app.include_router(memory.router)
 app.include_router(integrations.router)
 app.include_router(dashboard.router)
 app.include_router(copilot.router)
+app.include_router(metrics.router)
 
 
 @app.get("/health", tags=["ops"])

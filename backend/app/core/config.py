@@ -68,7 +68,27 @@ class Settings(BaseSettings):
     # How many generations Agent 4 may run at once. Default 1: on a free-tier key, six concurrent
     # calls is the surest way to earn a 429 or a 503, and a failed run costs far more than the
     # minute the concurrency saved. Raise it once you are on a paid quota.
-    gemini_concurrency: int = 1
+    gemini_concurrency: int = 3
+
+    # Ordered fallbacks, tried the instant the primary returns a transient error. NEVER WAIT IF
+    # ANOTHER MODEL IS AVAILABLE — backoff is what you do when you have no alternative.
+    # e.g. ["gemini-3.5-flash", "gemini-3.1-flash-lite", "anthropic:claude-sonnet-5"]
+    fallback_chain: list[str] = ["gemini-3.5-flash", "gemini-3.1-flash-lite"]
+    max_fallback_cycles: int = 3
+
+    # Run Agent 3 (wireframes) and Agent 4 (documents) CONCURRENTLY. They are independent: both
+    # derive from the approved concept note and requirements. The only coupling was that Agent 4's
+    # prompt included the wireframe spec as context — which was never a real dependency. Documents
+    # should derive from approved REQUIREMENTS, not from a picture. Set false to restore the old
+    # sequential behaviour exactly.
+    parallel_wireframes: bool = True
+
+    # Exact-hash response cache (NOT semantic — see llm/cache.py for why that would be dangerous).
+    llm_cache_enabled: bool = True
+
+    # Chunk-parallel extraction for large sources.
+    ingest_chunk_chars: int = 12000
+    ingest_max_parallel: int = 4
 
     use_vertex: bool = False
     vertex_project: str = ""

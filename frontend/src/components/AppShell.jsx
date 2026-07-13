@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Blocks, Bot, ChevronsLeft, FilePlus2, FileStack, FolderKanban, LayoutDashboard,
-  Library, Moon, PanelRightClose, PanelRightOpen, Search, Settings, ShieldCheck, Sun,
+  Gauge, Library, Moon, PanelRightClose, PanelRightOpen, Search, Settings, ShieldCheck, Sun,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
@@ -18,6 +18,7 @@ const NAV = [
   { to: '/agents', label: 'AI Agents', icon: Bot },
   { to: '/review', label: 'Review Center', icon: ShieldCheck, badgeKey: 'pending' },
   { to: '/documents', label: 'Documents', icon: FileStack },
+  { to: '/performance', label: 'Performance', icon: Gauge },
   { to: '/integrations', label: 'Integrations', icon: Blocks },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]

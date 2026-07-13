@@ -19,6 +19,7 @@ from langgraph.types import Command
 from app.core.db import SessionLocal
 from app.core.logging import log
 from app.graph.builder import build_graph
+from app.memory import shared
 from app.memory.short_term import checkpointer
 from app.models import Project, Run, RunStatus
 
@@ -35,10 +36,17 @@ def _execute(thread_id: str, payload: Any) -> None:
     try:
         with checkpointer() as cp:
             graph = build_graph(cp)
-            for chunk in graph.stream(payload, _config(thread_id), stream_mode="updates"):
-                if "__interrupt__" in chunk:
-                    log.info("run.suspended", thread=thread_id)
-                    return
+            # One retrieval scope for the WHOLE run, opened here rather than inside a node.
+            # LangGraph copies the context into each parallel worker thread, so a scope opened in a
+            # node is private to that node — the memo would never be hit by the branch beside it.
+            rag_token = shared.begin_run()
+            try:
+                for chunk in graph.stream(payload, _config(thread_id), stream_mode="updates"):
+                    if "__interrupt__" in chunk:
+                        log.info("run.suspended", thread=thread_id)
+                        return
+            finally:
+                shared.end_run(rag_token)
         log.info("run.finished", thread=thread_id)
     except Exception as e:
         log.exception("run.failed", thread=thread_id)

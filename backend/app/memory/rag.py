@@ -13,7 +13,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.metrics import metrics
 from app.llm.gemini import gemini
+from app.memory import shared
 from app.memory.vector_store import get_vector_store
 
 CHUNK_CHARS = 1200
@@ -61,10 +63,20 @@ def retrieve(
 ) -> list[dict[str, Any]]:
     """`min_score` is opt-in: cosine similarity is legitimately negative, and a naive
     `>= 0` floor silently drops valid hits. Callers that want a relevance floor set one."""
-    emb = gemini().embed([query])[0]
-    hits = get_vector_store().search(
-        project_id=project_id, embedding=emb, k=k, namespaces=namespaces
-    )
+    # One retrieval per (query, k, namespaces) per run. Agent 2 and Agent 4 both ask for
+    # "regulatory constraints for this capability" over evidence that cannot have changed between
+    # them — that is an embedding call and a vector search spent proving what we already knew.
+    memo = shared.cached(project_id, query, k, namespaces)
+    if memo is not None:
+        hits = memo
+    else:
+        with metrics.timed(stage="rag"):
+            emb = gemini().embed([query])[0]
+            hits = get_vector_store().search(
+                project_id=project_id, embedding=emb, k=k, namespaces=namespaces
+            )
+        shared.remember(project_id, query, k, namespaces, hits)
+
     if min_score is None:
         return hits
     return [h for h in hits if h["score"] >= min_score]

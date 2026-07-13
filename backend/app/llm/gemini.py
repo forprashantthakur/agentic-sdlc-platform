@@ -102,22 +102,51 @@ class GeminiClient:
     def generate_json(
         self, *, system: str, prompt: str, schema: dict[str, Any], task: str,
         model: str | None = None, temperature: float = 0.2, thinking: int | None = None,
+        project_id: str = "", agent: str | None = None,
     ) -> dict[str, Any]:
-        """Constrained generation. Returns a dict conforming to `schema`."""
+        """Constrained generation. Returns a dict conforming to `schema`.
+
+        Routed through the fallback chain: a transient failure moves to the next model IMMEDIATELY
+        rather than sleeping on a sick one. And an exact-hash cache short-circuits a genuinely
+        identical request — a replay after a mid-pipeline failure, or Agent 4's repeated system
+        prompt — without ever serving one project's answer to another (the evidence is in the prompt,
+        and the prompt is in the key).
+        """
         if not self.live:
             return mock_json(task=task, prompt=prompt, schema=schema)
 
-        raw = self._call_escalating(
-            model=model or settings.gemini_model,
-            system=system, prompt=prompt, temperature=temperature,
-            json_schema=schema, task=task,
-            thinking=settings.gemini_thinking_budget if thinking is None else thinking,
-        )
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            log.error("gemini.bad_json", task=task, head=raw[:400], length=len(raw))
-            raise
+        from app.llm.cache import response_cache
+        from app.llm.fallback import Candidate, execute
+
+        primary = Candidate("gemini", model or settings.gemini_model)
+        ck = response_cache.key(project_id=project_id, model=primary.model, system=system,
+                                prompt=prompt, schema=schema)
+        if settings.llm_cache_enabled and (hit := response_cache.get(ck)) is not None:
+            return hit
+
+        def call(c: Candidate):
+            if c.provider == "anthropic":
+                from app.llm.router import provider
+
+                return provider("anthropic").generate_json(
+                    system=system, prompt=prompt, schema=schema, task=task,
+                    model=c.model, temperature=temperature,
+                )
+            raw = self._call_escalating(
+                model=c.model, system=system, prompt=prompt, temperature=temperature,
+                json_schema=schema, task=task,
+                thinking=settings.gemini_thinking_budget if thinking is None else thinking,
+            )
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                log.error("gemini.bad_json", task=task, head=raw[:400], length=len(raw))
+                raise
+
+        out = execute(primary=primary, call=call, is_transient=_transient, task=task, agent=agent)
+        if settings.llm_cache_enabled:
+            response_cache.put(ck, out)
+        return out
 
     def generate_text(
         self, *, system: str, prompt: str, task: str, model: str | None = None,
@@ -294,6 +323,13 @@ class GeminiClient:
 
         usage = getattr(resp, "usage_metadata", None)
         if usage:
+            from app.core.metrics import metrics  # noqa: PLC0415
+
+            metrics.record(
+                agent=None, model=model, stage="tokens", ms=0.0,
+                tokens_in=getattr(usage, "prompt_token_count", 0) or 0,
+                tokens_out=getattr(usage, "candidates_token_count", 0) or 0,
+            )
             log.info("gemini.usage", task=task, model=model,
                      prompt_tokens=getattr(usage, "prompt_token_count", None),
                      output_tokens=getattr(usage, "candidates_token_count", None),
@@ -416,6 +452,20 @@ def _hash_embedding(text: str, dim: int) -> list[float]:
     vec = vec[:dim]
     norm = sum(v * v for v in vec) ** 0.5 or 1.0
     return [v / norm for v in vec]
+
+
+def _transient(e: Exception) -> bool:
+    """Transient => try the next model at once. Permanent => stop, and name the fix.
+
+    A 429 is BOTH, depending on its body: "quota exceeded, retry in 40s" is transient; "limit: 0" is
+    an entitlement, and no amount of waiting or failing over will conjure one.
+    """
+    if isinstance(e, TransientError):
+        return True
+    msg = str(e)
+    if any(pm in msg for pm in PERMANENT):
+        return False
+    return any(t in msg for t in TRANSIENT) or isinstance(e, (ConnectionError, TimeoutError))
 
 
 _client: GeminiClient | None = None

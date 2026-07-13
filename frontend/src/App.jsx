@@ -5,6 +5,7 @@ import DemoLibrary from './components/DemoLibrary'
 import { ToastProvider, useToast } from './components/ui'
 import { api } from './lib/api'
 import Dashboard from './pages/Dashboard'
+import Performance from './pages/Performance'
 import NewBrd from './pages/NewBrd'
 import { Agents, Documents, Integrations, Knowledge, Projects, ReviewCenter, Settings } from './pages/Misc'
 
@@ -43,6 +44,7 @@ function Shell() {
         <Route path="/agents" element={<Agents />} />
         <Route path="/review" element={<ReviewCenter setProject={setProject} />} />
         <Route path="/documents" element={<Documents project={project} />} />
+        <Route path="/performance" element={<Performance />} />
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/settings" element={<Settings />} />
       </Routes>

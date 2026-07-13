@@ -36,8 +36,11 @@ from app.agents.a5_approval import ApprovalAgent
 from app.agents.a6_sprint import SprintAgent
 from app.agents.base import AgentContext
 from app.core import progress
+from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.logging import log
+from app.core.metrics import metrics
+from app.memory import shared
 from app.graph.state import MAX_REVISIONS, SDLCState
 from app.memory import rag
 from app.models import ArtifactType, Run, RunEvent, RunStatus, Source
@@ -97,7 +100,8 @@ def _node(fn):
             _event(db, state["run_id"], name, f"{name} started")
             db.commit()
 
-            out = fn(db, state)
+            with metrics.timed(agent=name, stage="pipeline"):
+                out = fn(db, state)
 
             db.commit()
             return out
@@ -113,6 +117,8 @@ def _node(fn):
             raise
         finally:
             progress.reset_channel(token)
+            _event(db, state["run_id"], name, f"{name} finished in {time.monotonic() - started:.1f}s")
+            db.commit()
             db.close()
 
     wrapper.__name__ = fn.__name__
@@ -307,6 +313,23 @@ def _gate_artifacts(gate: str) -> list[ArtifactType]:
     ]
 
 
+def _route_parallel(gate: str):
+    """Fan out to BOTH agent 3 and agent 4 on approval. LangGraph runs them concurrently and joins
+    at request_docs_approval — the gate cannot open until both have landed."""
+
+    def router(state: SDLCState):
+        verdict = state.get("gate_decisions", {}).get(gate, "APPROVED")
+        rev = state.get("revision", {}).get(gate, 0)
+        if verdict == "APPROVED":
+            return ["agent3_wireframe", "agent4_requirement_docs"]
+        if verdict == "REJECTED" or rev >= MAX_REVISIONS:
+            log.warning("gate.exhausted", gate=gate, revisions=rev)
+            return "finalise"
+        return "agent2_concept_note"
+
+    return router
+
+
 def _route(gate: str, on_approve: str, on_revise: str):
     def router(state: SDLCState) -> str:
         verdict = state.get("gate_decisions", {}).get(gate, "APPROVED")
@@ -344,14 +367,35 @@ def build_graph(checkpointer):
     g.add_edge("agent2_concept_note", "request_concept_approval")
     g.add_edge("request_concept_approval", "await_concept_approval")
 
-    g.add_conditional_edges(
-        "await_concept_approval",
-        _route(CONCEPT_GATE, on_approve="agent3_wireframe", on_revise="agent2_concept_note"),
-        ["agent3_wireframe", "agent2_concept_note", "finalise"],
-    )
-
-    g.add_edge("agent3_wireframe", "agent4_requirement_docs")
-    g.add_edge("agent4_requirement_docs", "request_docs_approval")
+    if settings.parallel_wireframes:
+        # ── the DAG ───────────────────────────────────────────────────────────────
+        # Agent 3 (wireframes) and Agent 4 (documents) are INDEPENDENT: both derive from the
+        # approved concept note and the approved requirements. Running them in series was costing
+        # us the whole of Agent 3's latency — a Stitch round-trip per screen — for nothing.
+        #
+        # The only thing coupling them was that Agent 4's prompt carried the wireframe spec as
+        # context. That was never a real dependency, and arguably it was a bug: documents should
+        # derive from approved REQUIREMENTS, not from a picture of them. The traceability chain runs
+        # requirement -> document and requirement -> screen, in parallel, not in a line.
+        #
+        # LangGraph fans out on multiple edges from one node and fans in when both complete, so the
+        # docs gate still cannot open until BOTH have finished.
+        g.add_conditional_edges(
+            "await_concept_approval",
+            _route_parallel(CONCEPT_GATE),
+            ["agent3_wireframe", "agent4_requirement_docs", "agent2_concept_note", "finalise"],
+        )
+        g.add_edge("agent3_wireframe", "request_docs_approval")
+        g.add_edge("agent4_requirement_docs", "request_docs_approval")
+    else:
+        # Sequential — identical to the original behaviour. This is the rollback switch.
+        g.add_conditional_edges(
+            "await_concept_approval",
+            _route(CONCEPT_GATE, on_approve="agent3_wireframe", on_revise="agent2_concept_note"),
+            ["agent3_wireframe", "agent2_concept_note", "finalise"],
+        )
+        g.add_edge("agent3_wireframe", "agent4_requirement_docs")
+        g.add_edge("agent4_requirement_docs", "request_docs_approval")
     g.add_edge("request_docs_approval", "await_docs_approval")
 
     g.add_conditional_edges(
