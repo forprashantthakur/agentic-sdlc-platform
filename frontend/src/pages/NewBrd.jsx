@@ -28,7 +28,10 @@ export default function NewBrd({ project, setProject, run, setRun }) {
       {step === 'ingestion' && <KnowledgeIngestion project={project} onNext={() => advance('ingestion')} onBack={() => back('ingestion')} />}
       {step === 'discovery' && <Discovery project={project} onNext={() => advance('discovery')} onBack={() => back('discovery')} />}
       {step === 'analysis' && <AiAnalysis project={project} run={run} setRun={setRun} onNext={() => advance('analysis')} onBack={() => back('analysis')} />}
-      {step === 'review' && <Review project={project} onNext={() => advance('review')} onBack={() => back('review')} />}
+      {step === 'review' && (
+        <Review project={project} onNext={() => advance('review')} onBack={() => back('review')}
+          onWatchRun={() => setStep('analysis')} />
+      )}
       {step === 'generate' && <GenerateBrd project={project} onBack={() => back('generate')} />}
     </>
   )

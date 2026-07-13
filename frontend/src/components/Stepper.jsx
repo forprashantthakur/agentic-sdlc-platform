@@ -6,9 +6,9 @@ export const STEPS = [
   { id: 'context', label: 'Business Context', hint: 'Sponsor, objectives, KPIs' },
   { id: 'ingestion', label: 'Knowledge Ingestion', hint: 'Documents & connectors' },
   { id: 'discovery', label: 'Requirement Discovery', hint: 'Clarify with the copilot' },
-  { id: 'analysis', label: 'AI Analysis', hint: 'Six agents, two gates' },
-  { id: 'review', label: 'Review', hint: 'Approve, reject, modify' },
-  { id: 'generate', label: 'Generate BRD', hint: 'Export & publish' },
+  { id: 'analysis', label: 'AI Analysis', hint: 'Agents 1–2 → Gate 1' },
+  { id: 'review', label: 'Review & Gates', hint: 'Gate 1 → Agents 3–4 → Gate 2' },
+  { id: 'generate', label: 'Documents', hint: 'BRD, FRD, SRS · export' },
 ]
 
 export default function Stepper({ current, completed = [], onSelect }) {
