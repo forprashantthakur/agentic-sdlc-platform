@@ -60,11 +60,26 @@ class StitchAdapter:
     """
 
     def __init__(self, url: str, api_key: str) -> None:
-        # Google APIs take the key in x-goog-api-key. We send the bearer header too, because the
-        # OAuth path (STITCH_ACCESS_TOKEN) uses it and one adapter should serve both.
-        self.mcp = McpClient(url, headers={"x-goog-api-key": api_key} if api_key else {})
-        if api_key:
-            self.mcp.headers["Authorization"] = f"Bearer {api_key}"
+        # ONE credential, never two.
+        #
+        # Sending both `x-goog-api-key` AND `Authorization: Bearer <api-key>` returns 401 — and not
+        # for the reason you would guess. Google's auth middleware sees an Authorization header,
+        # tries to validate it as an OAuth token, fails, and returns 401 WITHOUT EVER LOOKING at the
+        # perfectly valid API key beside it. Belt-and-braces became a self-inflicted wound.
+        #
+        # So: an API key goes in x-goog-api-key, alone. An OAuth access token goes in Authorization,
+        # alone (with the billing project, which OAuth requires and API keys do not).
+        headers: dict[str, str] = {}
+        if settings.stitch_access_token:
+            headers["Authorization"] = f"Bearer {settings.stitch_access_token}"
+            if settings.vertex_project or settings.google_cloud_project:
+                headers["x-goog-user-project"] = (
+                    settings.google_cloud_project or settings.vertex_project
+                )
+        elif api_key:
+            headers["x-goog-api-key"] = api_key
+
+        self.mcp = McpClient(url, headers=headers)
 
     def list_tools(self, refresh: bool = False) -> dict[str, dict]:
         return self.mcp.list_tools(refresh=refresh)

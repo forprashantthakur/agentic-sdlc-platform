@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # Verified against google-labs-code/stitch-sdk. It is googleapis.com, not withgoogle.com.
     stitch_mcp_url: str = "https://stitch.googleapis.com/mcp"
     stitch_api_key: str = ""
+    # The OAuth alternative. NEVER send both this and an API key — Google validates the
+    # Authorization header first, fails, and 401s without looking at the key.
+    stitch_access_token: str = ""
+    google_cloud_project: str = ""
     stitch_mock: bool | None = None
 
     figma_mcp_url: str = "https://mcp.figma.com/mcp"

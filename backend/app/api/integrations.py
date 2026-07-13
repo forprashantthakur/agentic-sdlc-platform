@@ -41,6 +41,9 @@ def wireframe_tools():
     return {
         "provider": provider,
         "server": settings.stitch_mcp_url if provider == "stitch" else settings.figma_mcp_url,
+        "auth": ("oauth (Authorization: Bearer)" if settings.stitch_access_token
+                 else "api key (x-goog-api-key)" if settings.stitch_api_key
+                 else "NONE — this will 401"),
         "tool_count": len(tools),
         "tools": [{"name": n, "description": (t.get("description") or "")[:200],
                    "input_schema": t.get("inputSchema")} for n, t in sorted(tools.items())],
