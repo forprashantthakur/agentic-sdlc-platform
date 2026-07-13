@@ -4,50 +4,59 @@ import { cn } from '../lib/utils'
 /**
  * The bank's wordmark.
  *
- * Deliberately loaded as an asset rather than hand-drawn in SVG. The HDFC Bank logo is a
- * registered trademark: an approximation would be legally awkward and would look subtly wrong
- * next to the real thing on a deck. Drop the official file in and it renders; leave it out and
- * this falls back to a neutral monogram rather than breaking the header.
+ * Loaded as an asset, never hand-drawn. The HDFC Bank logo is a registered trademark: an SVG
+ * approximation would be legally awkward and would look subtly wrong — wrong red, wrong kerning —
+ * next to the real thing on a slide.
  *
- *   frontend/public/brand/hdfc-logo.svg   full wordmark   (expanded sidebar)
- *   frontend/public/brand/hdfc-mark.svg   square mark     (collapsed sidebar) — optional
+ * Drop the official file in `frontend/public/brand/` as ANY of:
+ *   hdfc-logo.svg | .png | .jpg     full wordmark  (expanded sidebar)
+ *   hdfc-mark.svg | .png | .jpg     square mark    (collapsed rail, optional)
  *
- * The logo is dark-blue-on-white, so on the dark theme it sits on a white plate. Reversing a
- * trademark's colours is usually a brand-guideline violation; giving it the white field it was
- * designed for is not.
+ * The component tries each extension in turn and falls back to a neutral monogram if none exist,
+ * so a missing file degrades quietly instead of leaving a broken-image icon in the header.
  */
+const EXTS = ['svg', 'png', 'jpg', 'jpeg', 'webp']
+
+function Asset({ name, className, onExhausted }) {
+  const [i, setI] = useState(0)
+  if (i >= EXTS.length) {
+    onExhausted?.()
+    return null
+  }
+  return (
+    <img
+      src={`/brand/${name}.${EXTS[i]}`}
+      alt="HDFC Bank"
+      className={className}
+      onError={() => setI(i + 1)}
+    />
+  )
+}
+
 export default function BrandLogo({ collapsed = false }) {
-  const [full, setFull] = useState(true)
-  const [mark, setMark] = useState(true)
+  const [noFull, setNoFull] = useState(false)
+  const [noMark, setNoMark] = useState(false)
 
   if (collapsed) {
-    return mark ? (
+    if (noMark) return <Fallback compact />
+    return (
       <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white p-1 shadow-sm ring-1 ring-line/60">
-        <img
-          src="/brand/hdfc-mark.svg"
-          alt="HDFC Bank"
-          className="h-full w-full object-contain"
-          onError={() => setMark(false)}
-        />
+        <Asset name="hdfc-mark" className="h-full w-full object-contain"
+               onExhausted={() => setNoMark(true)} />
       </div>
-    ) : (
-      <Fallback compact />
     )
   }
 
-  if (!full) return <Fallback />
+  if (noFull) return <Fallback />
 
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      {/* The white plate is the logo's designed background — it keeps the mark legible in dark mode
-          without recolouring a trademark. */}
+      {/* The logo is designed for a white field. Recolouring or reversing a trademark is normally a
+          brand-guideline violation; giving it the background it was made for is not — so it sits on
+          a white plate in both light and dark themes. */}
       <div className="flex h-10 items-center rounded-lg bg-white px-2 shadow-sm ring-1 ring-line/60">
-        <img
-          src="/brand/hdfc-logo.svg"
-          alt="HDFC Bank"
-          className="h-6 w-auto max-w-[128px] object-contain"
-          onError={() => setFull(false)}
-        />
+        <Asset name="hdfc-logo" className="h-6 w-auto max-w-[130px] object-contain"
+               onExhausted={() => setNoFull(true)} />
       </div>
       <div className="min-w-0 leading-tight">
         <div className="truncate text-[11px] font-semibold text-ink">Agentic SDLC</div>
