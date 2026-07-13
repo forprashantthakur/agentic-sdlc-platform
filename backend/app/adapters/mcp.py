@@ -55,27 +55,67 @@ class McpClient:
                      names=sorted(self._tools)[:30])
         return self._tools
 
-    def resolve(self, candidates: list[str], operation: str = "") -> str | None:
-        """Map a logical operation onto whatever this server actually calls it."""
+    def resolve(self, candidates: list[str], operation: str = "", fuzzy: bool = True) -> str | None:
+        """Map a logical operation onto whatever this server actually calls it.
+
+        `fuzzy` exists because fuzzy matching bit us once, hard: `set_design_system` fuzzily matched
+        `apply_design_system`, a completely different tool with completely different arguments. The
+        call failed, and the failure surfaced three layers up as "wireframes pending" with no clue
+        why. For any operation where a near-miss is worse than a clean absence, pass fuzzy=False.
+        """
         available = self.list_tools()
         for c in candidates:
             if c in available:
                 return c
-        # Fuzzy fallback — servers rename things, and a near-miss beats a hard failure.
+        if not fuzzy:
+            return None
         want = (operation or candidates[0]).replace("_", "").replace("-", "").lower()
         for name in available:
             if want in name.replace("_", "").replace("-", "").lower():
+                log.warning("mcp.fuzzy_match", operation=operation or candidates[0], matched=name,
+                            note="verify the argument schema — a near-miss tool takes different args")
                 return name
         return None
 
-    def call(self, candidates: list[str], args: dict[str, Any], operation: str = "") -> dict[str, Any]:
-        name = self.resolve(candidates, operation)
+    def schema_of(self, tool: str) -> dict[str, Any]:
+        return (self.list_tools().get(tool) or {}).get("inputSchema") or {}
+
+    def adapt_args(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Rename our snake_case arguments to whatever the tool's schema actually declares.
+
+        Google's MCP tools take camelCase (`projectId`, `assetId`); ours were snake_case, so every
+        call would have been rejected on validation. Rather than hard-coding a convention that will
+        change again, we read the tool's own input schema and match each argument to the property it
+        declares. Anything the schema does not declare is dropped, because an unexpected property is
+        a rejected request on a strict schema.
+        """
+        props = (self.schema_of(tool).get("properties") or {}).keys()
+        if not props:
+            return args      # no schema published — send what we have and let the server judge
+
+        def variants(k: str) -> list[str]:
+            camel = "".join(w if i == 0 else w.capitalize() for i, w in enumerate(k.split("_")))
+            return [k, camel, k.replace("_", ""), camel.lower()]
+
+        out: dict[str, Any] = {}
+        for key, value in args.items():
+            match = next((v for v in variants(key) if v in props), None)
+            if match:
+                out[match] = value
+            else:
+                log.info("mcp.arg_dropped", tool=tool, arg=key,
+                         note="not declared in the tool's schema")
+        return out
+
+    def call(self, candidates: list[str], args: dict[str, Any], operation: str = "",
+             fuzzy: bool = True) -> dict[str, Any]:
+        name = self.resolve(candidates, operation, fuzzy=fuzzy)
         if name is None:
             raise RuntimeError(
                 f"This MCP server exposes no tool for '{operation or candidates[0]}'. "
                 f"Available: {sorted(self.list_tools())}"
             )
-        res = self.rpc("tools/call", {"name": name, "arguments": args})
+        res = self.rpc("tools/call", {"name": name, "arguments": self.adapt_args(name, args)})
 
         if (content := res.get("structuredContent")) is not None:
             return content

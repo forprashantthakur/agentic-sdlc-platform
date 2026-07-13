@@ -33,7 +33,21 @@ TOOLS: dict[str, list[str]] = {
     "generate_screen": ["generate_screen_from_text", "generate_screen", "create_screen",
                         "generate_ui", "stitch_generate_screen"],
     "get_screen": ["get_screen", "get_screen_html", "fetch_screen", "screen_get"],
-    "set_design_system": ["set_design_system", "apply_design_system", "update_design_system"],
+    # Creating a design system and APPLYING one to existing screens are different tools with
+    # different arguments. Conflating them (via a fuzzy match) is what silently killed the whole
+    # wireframe step: apply_design_system rejected our args, and Agent 3 reported "screens pending".
+    "create_design_system": ["create_design_system"],
+    "apply_design_system": ["apply_design_system"],
+    "get_project": ["get_project"],
+}
+
+# HDFC brand, expressed in the enums Stitch actually accepts (read from its published schema).
+BRAND_THEME = {
+    "bodyFont": "INTER",
+    "headlineFont": "INTER",
+    "colorMode": "LIGHT",
+    "colorVariant": "NEUTRAL",
+    "customColor": "#004C8F",   # HDFC navy — the seed for Stitch's dynamic colour system
 }
 
 
@@ -66,13 +80,25 @@ class StitchAdapter:
         )
         project_id = project.get("project_id") or project.get("id") or project.get("projectId", "")
 
-        # Optional: give Stitch the bank's design system up front, so it does not invent one.
+        # Give Stitch the bank's brand up front, so it does not invent a design system. Exact tool
+        # name only — no fuzzy matching here, because the near-miss (apply_design_system) takes
+        # entirely different arguments and its failure kills the run.
+        #
+        # And catch Exception, not RuntimeError: a schema-validation rejection arrives as an
+        # httpx.HTTPStatusError, which sailed straight past the old `except RuntimeError` and took
+        # the whole wireframe step down with it. Branding is a nice-to-have; it must never be able
+        # to cost us the screens.
         try:
-            self.mcp.call(TOOLS["set_design_system"],
-                          {"project_id": project_id, "design_system": design_system},
-                          operation="set_design_system")
-        except RuntimeError:
-            log.info("stitch.no_design_system_tool", note="continuing with the prompt's guidance only")
+            self.mcp.call(
+                TOOLS["create_design_system"],
+                {"project_id": project_id,
+                 "design_system": {"displayName": "HDFC Bank", "theme": BRAND_THEME}},
+                operation="create_design_system", fuzzy=False,
+            )
+            log.info("stitch.design_system_applied", colour=BRAND_THEME["customColor"])
+        except Exception as e:
+            log.info("stitch.design_system_skipped", error=str(e)[:140],
+                     note="screens will still generate — brand comes from the prompt instead")
 
         out_screens: list[dict[str, Any]] = []
         for sc in screens:

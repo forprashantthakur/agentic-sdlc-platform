@@ -489,3 +489,29 @@ Three things are cleaned up that a naive `DELETE` would leave behind, each a gen
   deleted project keeps answering the copilot from beyond the grave.
 - **LangGraph checkpoints.** One thread per run. Leave them and the runs stay *resumable* — a stale
   approval link could wake an agent for a project that is gone.
+
+
+### Stitch: the two bugs that produced "no wireframes"
+
+Both were mine, and both are the same lesson.
+
+**1. A fuzzy tool match.** `set_design_system` does not exist on Stitch; my resolver fuzzily matched
+it to `apply_design_system` — a different tool, with different arguments (`assetId` plus a list of
+existing screen instances). The call was rejected, the rejection arrived as an
+`httpx.HTTPStatusError` rather than the `RuntimeError` I was catching, and it took the entire
+wireframe step down with it. Agent 3 reported "screens pending" and nobody could see why.
+
+Fuzzy matching now warns loudly, and any operation where a near-miss is worse than a clean absence
+passes `fuzzy=False`. Branding is a nice-to-have; it must never be able to cost you the screens.
+
+**2. Argument names.** Google's MCP tools take camelCase (`projectId`, `deviceType`); I was sending
+snake_case. Every call would have been rejected on validation.
+
+Rather than hard-code a convention that will change again, `McpClient.adapt_args()` now reads each
+tool's published `inputSchema` and renames our arguments to whatever the server actually declares —
+dropping anything it does not, because an unexpected property is a rejected request on a strict
+schema. **The server tells us its shape; we no longer guess it.**
+
+Generated screens also now inherit HDFC navy (`#004C8F`) as the seed for Stitch's dynamic colour
+system, with Inter as the type family — so the wireframes come out looking like the bank's, not like
+generic Material defaults.
