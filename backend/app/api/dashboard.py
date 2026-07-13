@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 AGENTS = [
     ("agent1_requirements", "Requirement Gathering", "Meeting notes, emails, transcripts → structured requirements"),
     ("agent2_concept_note", "Concept Note", "Objectives, scope, business rules, risks"),
-    ("agent3_wireframe", "Wireframe", "Screen spec → Figma via MCP"),
+    ("agent3_wireframe", "Wireframe", "Screen spec → Stitch via MCP"),
     ("agent4_requirement_docs", "Requirement Documents", "BRD · FRD · SRS · Stories · APIs · NFRs"),
     ("agent5_approval", "Approval", "Approval emails, comments, versioning, gates"),
     ("agent6_sprint", "Sprint", "Epics, stories, points → Jira"),

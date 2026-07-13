@@ -20,8 +20,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://sdlc:sdlc@localhost:5432/sdlc"
 
     google_api_key: str = ""
-    gemini_model: str = "gemini-2.5-pro"
-    gemini_flash_model: str = "gemini-2.5-flash"
+    # Model names churn hard: 2.5 was retired for new keys, and gemini-3-pro now redirects.
+    # These are current defaults, not guarantees — GET /api/integrations/llm/models asks YOUR key
+    # what it can actually call, and that is the only answer that stays true.
+    gemini_model: str = "gemini-3.1-pro"
+    gemini_flash_model: str = "gemini-3.1-flash"
     # text-embedding-004 is gone from the current API version (404 on embedContent).
     gemini_embed_model: str = "gemini-embedding-001"
 

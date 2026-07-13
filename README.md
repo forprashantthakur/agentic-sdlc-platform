@@ -515,3 +515,29 @@ schema. **The server tells us its shape; we no longer guess it.**
 Generated screens also now inherit HDFC navy (`#004C8F`) as the seed for Stitch's dynamic colour
 system, with Inter as the type family — so the wireframes come out looking like the bank's, not like
 generic Material defaults.
+
+
+---
+
+## When a run dies with a model error
+
+```
+GET /api/integrations/llm/models
+```
+
+It asks **your key** which models it can actually call, and tells you whether the ones you have
+configured are among them. Then set `GEMINI_MODEL` to one of `generation_models` and
+`GEMINI_EMBED_MODEL` to one of `embedding_models`.
+
+This endpoint exists because model names churn faster than any hard-coded default survives. In the
+space of one afternoon this platform hit all three of these:
+
+| Error | What it actually means |
+|---|---|
+| `429 … limit: 0` on `gemini-2.5-pro` | Not a rate limit you can wait out. That model has **no free-tier quota at all** on this key. Enable billing, or pick a model that does. |
+| `404 … no longer available to new users` on `gemini-2.5-flash` | The **2.5 family is retired** for new keys. |
+| `404 … not found for embedContent` on `text-embedding-004` | Dead. Use `gemini-embedding-001`. |
+
+Each of those is now caught and re-raised with the fix named in the error text, rather than a
+200-line provider stack trace. But the durable answer is not a better default — it is to **ask the
+API**, which is what this endpoint does.

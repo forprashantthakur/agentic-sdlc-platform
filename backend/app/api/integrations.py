@@ -94,6 +94,16 @@ def llm_selftest():
     return gemini().selftest()
 
 
+@router.get("/llm/models")
+def llm_models():
+    """List the models THIS key can actually call, and flag whether the configured ones are among them.
+
+    Run this the moment a run dies with a 404. Model names change faster than any hard-coded default
+    can keep up with, and the API is the only source of truth about your key.
+    """
+    return gemini().list_models()
+
+
 @router.get("/llm/agents")
 def llm_agents():
     """Which agents call the model, with what, and at what temperature.

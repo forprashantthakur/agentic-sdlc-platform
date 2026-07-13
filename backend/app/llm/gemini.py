@@ -153,6 +153,15 @@ class GeminiClient:
             # "limit: 0" is not "you ran out" — it is "this model has no free-tier quota on this
             # project at all". Those are completely different problems and the raw error does a
             # poor job of saying so.
+            # A retired model is a 404, not a quota error, and the message is easy to miss inside a
+            # provider stack trace. Name the fix in the error itself.
+            if "NOT_FOUND" in msg or "404" in msg or "no longer available" in msg:
+                raise RuntimeError(
+                    f"{task}: the model '{model}' is not available to this API key "
+                    "(retired, or never enabled). Model names churn — call "
+                    "GET /api/integrations/llm/models to see exactly what this key CAN call, then "
+                    "set GEMINI_MODEL to one of them."
+                ) from e
             if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
                 if "limit: 0" in msg:
                     raise RuntimeError(
@@ -192,6 +201,46 @@ class GeminiClient:
                      output_tokens=getattr(usage, "candidates_token_count", None),
                      thoughts=getattr(usage, "thoughts_token_count", None))
         return text
+
+    def list_models(self) -> dict[str, Any]:
+        """What this key can actually call. Ends the guessing.
+
+        Model names churn fast — 2.5 was retired for new keys, and even `gemini-3-pro` now redirects
+        to a 3.1 preview. Hard-coding a name means breaking again at the next rename. Asking the API
+        is the only answer that stays true.
+        """
+        if not self.live:
+            return {"live": False, "note": "MOCK_MODE is on or no credential is set."}
+
+        try:
+            models = list(self._client.models.list())
+        except Exception as e:
+            return {"live": True, "error": f"{type(e).__name__}: {e}"}
+
+        def usable(m, action: str) -> bool:
+            return action in (getattr(m, "supported_actions", None) or [])
+
+        gen = sorted(
+            (m.name.replace("models/", "") for m in models if usable(m, "generateContent")),
+        )
+        emb = sorted(
+            (m.name.replace("models/", "") for m in models if usable(m, "embedContent")),
+        )
+        return {
+            "live": True,
+            "configured": {
+                "GEMINI_MODEL": settings.gemini_model,
+                "GEMINI_FLASH_MODEL": settings.gemini_flash_model,
+                "GEMINI_EMBED_MODEL": settings.gemini_embed_model,
+            },
+            "configured_model_is_available": settings.gemini_model in gen,
+            "configured_embed_is_available": settings.gemini_embed_model in emb,
+            "generation_models": gen,
+            "embedding_models": emb,
+            "hint": "Set GEMINI_MODEL to one of generation_models and GEMINI_EMBED_MODEL to one of "
+                    "embedding_models. Both must appear in these lists — if a model is not here, "
+                    "your key cannot call it, whatever the docs say.",
+        }
 
     def selftest(self) -> dict[str, Any]:
         """Prove the live path end to end: structured output + embeddings, in one small call.

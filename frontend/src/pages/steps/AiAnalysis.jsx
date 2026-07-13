@@ -12,7 +12,7 @@ const PIPELINE = [
   { node: 'agent1_requirements', label: 'Agent 1 · Requirement Gathering', sub: 'Extract, cite, flag conflicts and gaps' },
   { node: 'agent2_concept_note', label: 'Agent 2 · Concept Note', sub: 'Objectives, scope, business rules, risks' },
   { node: 'request_concept_approval', label: 'Gate 1 · Human Approval', sub: 'Agent 5 — the run suspends here', gate: true },
-  { node: 'agent3_wireframe', label: 'Agent 3 · Wireframes', sub: 'Screen spec → Figma via MCP' },
+  { node: 'agent3_wireframe', label: 'Agent 3 · Wireframes', sub: 'Screen spec → Stitch via MCP' },
   { node: 'agent4_requirement_docs', label: 'Agent 4 · Requirement Documents', sub: 'BRD · FRD · SRS · Stories · APIs · NFRs' },
   { node: 'request_docs_approval', label: 'Gate 2 · Human Approval', sub: 'Agent 5 — the run suspends here', gate: true },
   { node: 'agent6_sprint', label: 'Agent 6 · Sprint Plan', sub: 'Epics, stories, points → Jira' },

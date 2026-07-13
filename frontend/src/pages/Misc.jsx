@@ -169,7 +169,7 @@ export function Knowledge({ project }) {
 const AGENT_DETAIL = {
   agent1_requirements: { input: 'Meeting notes · emails · transcripts · uploads', output: 'Structured requirements + conflicts + gaps', model: 'Gemini 2.5 Pro · temp 0.1' },
   agent2_concept_note: { input: 'Business requirements', output: 'Objectives · scope · rules · risks', model: 'Gemini 2.5 Pro · temp 0.25' },
-  agent3_wireframe: { input: 'Concept note', output: 'Screen spec → Figma frames (MCP)', model: 'Gemini 2.5 Pro · temp 0.35' },
+  agent3_wireframe: { input: 'Concept note', output: 'Screen spec → Stitch screens (HTML + PNG)', model: 'Gemini 2.5 Pro · temp 0.35' },
   agent4_requirement_docs: { input: 'Concept note + wireframes', output: 'BRD · FRD · SRS · Stories · ACs · APIs · NFRs', model: 'Gemini 2.5 Pro · temp 0.2–0.3' },
   agent5_approval: { input: 'Any artifact version', output: 'Approval emails · comments · version sealing', model: 'Deterministic — no LLM' },
   agent6_sprint: { input: 'Approved user stories', output: 'Epics · sprints · points → Jira', model: 'Gemini 2.5 Pro · temp 0.25' },
