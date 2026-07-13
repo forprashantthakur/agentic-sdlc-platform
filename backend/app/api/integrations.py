@@ -192,7 +192,7 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
     times — the screenshot URL was never where I expected it. A probe that prints reality is worth
     more than a fourth guess, and it means the next person to hit this does not repeat the exercise.
     """
-    from app.adapters.stitch import TOOLS, StitchAdapter, _artifacts, _inline_image
+    from app.adapters.stitch import TOOLS, StitchAdapter, _artifacts, _inline_image, _res_id
 
     adapter = registry.wireframer()
     if not isinstance(adapter, StitchAdapter):
@@ -203,7 +203,8 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
         project = adapter.mcp.call(TOOLS["create_project"], {"title": "Probe"},
                                    operation="create_project")
         out["create_project_raw"] = project
-        pid = project.get("project_id") or project.get("id") or project.get("projectId", "")
+        pid = _res_id(project, "project")
+        out["parsed_project_id"] = pid or "EMPTY — this is the bug: no screen can be generated"
 
         gen = adapter.mcp.call(
             TOOLS["generate_screen"],
@@ -211,7 +212,8 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
             operation="generate_screen",
         )
         out["generate_screen_raw"] = gen
-        sid = gen.get("screen_id") or gen.get("id") or gen.get("screenId", "")
+        sid = _res_id(gen, "screen")
+        out["parsed_screen_id"] = sid or "EMPTY"
 
         out["tools_available"] = sorted(adapter.mcp.list_tools())
 

@@ -104,7 +104,16 @@ class StitchAdapter:
             {"title": f"{project_name} — Wireframes"},   # the SDK's arg is `title`
             operation="create_project",
         )
-        project_id = project.get("project_id") or project.get("id") or project.get("projectId", "")
+        project_id = _res_id(project, "project")
+        if not project_id:
+            # Never call generate_screen with an empty id again. Stitch answers "Requested entity was
+            # not found", Agent 3 swallows it, and the run finishes looking successful with an empty
+            # screen grid — a failure that reports itself as a success is the worst kind.
+            raise RuntimeError(
+                "Stitch created a project but returned no id we could read. Raw response: "
+                f"{list(project.keys())} -> {str(project)[:200]}"
+            )
+        progress.emit(f"Stitch project {project_id} created — generating {len(screens)} screens.")
 
         # Give Stitch the bank's brand up front, so it does not invent a design system. Exact tool
         # name only — no fuzzy matching here, because the near-miss (apply_design_system) takes
@@ -135,7 +144,12 @@ class StitchAdapter:
                  "device_type": _device_type(design_system)},
                 operation="generate_screen",
             )
-            screen_id = res.get("screen_id") or res.get("id") or res.get("screenId", "")
+            screen_id = _res_id(res, "screen")
+            if not screen_id:
+                progress.emit(
+                    f"Stitch did not return a screen id for '{sc['name']}' — it said: "
+                    f"{str(res)[:160]}", level="warning",
+                )
 
             # Per the SDK: getHtml() and getImage() return DOWNLOAD URLS, not inline content.
             html, shot = _artifacts(res)
@@ -205,6 +219,32 @@ def _device_type(design_system: str) -> str:
         if k in ds:
             return v
     return "AGNOSTIC"
+
+
+
+def _res_id(obj: dict[str, Any], kind: str) -> str:
+    """The id of a Google resource, whatever shape the server chose to express it in.
+
+    Stitch is a Google API, and Google APIs return RESOURCE NAMES:
+
+        {"name": "projects/17771066040334319179"}
+        {"name": "projects/1777.../screens/8891..."}
+
+    They do not return `project_id`, `id`, or `projectId` — which is exactly what my code asked for,
+    and got nothing. An empty id was then passed to generate_screen, and Stitch answered
+    "Requested entity was not found." So no screen was ever generated, and I spent five rounds
+    hunting for the missing IMAGE of a screen that did not exist.
+
+    Read the resource name. Fall back to the flat keys for any server that does return them.
+    """
+    for key in (f"{kind}_id", "id", f"{kind}Id"):
+        if v := obj.get(key):
+            return str(v).split("/")[-1]
+
+    name = str(obj.get("name") or obj.get(kind) or "")
+    if f"{kind}s/" in name:                       # "projects/123" -> "123"; ".../screens/9" -> "9"
+        return name.split(f"{kind}s/", 1)[1].split("/")[0]
+    return name.split("/")[-1] if name else ""
 
 
 def _inline_image(res: dict[str, Any]) -> str:
