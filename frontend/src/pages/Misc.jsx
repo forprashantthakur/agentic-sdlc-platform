@@ -1,5 +1,5 @@
 /** The supporting pages: real where the backend supports it, honest where it doesn't. */
-import { Blocks, Bot, CheckCircle2, Database, FileStack, FolderKanban, Search, Settings as SettingsIcon, ShieldCheck, Trash2, XCircle } from 'lucide-react'
+import { Blocks, Bot, CheckCircle2, Database, FileStack, FolderKanban, Layers, Search, Settings as SettingsIcon, ShieldCheck, Trash2, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -356,8 +356,24 @@ export function Documents({ project }) {
 
 export function Integrations() {
   const [health, setHealth] = useState(null)
+  const [probe, setProbe] = useState(null)
+  const [probing, setProbing] = useState(false)
   useEffect(() => { api.health().then(setHealth).catch(() => {}) }, [])
   const ints = health?.integrations ?? {}
+
+  // Ask Stitch what it actually returns, and print it. This is here as a BUTTON rather than a raw
+  // endpoint because the alternative — me inferring the response shape from a screenshot — has been
+  // wrong four times running. One click, one payload, one fix.
+  const runProbe = async () => {
+    setProbing(true)
+    try {
+      setProbe(await api.get('/api/integrations/wireframes/probe'))
+    } catch (e) {
+      setProbe({ error: e.message })
+    } finally {
+      setProbing(false)
+    }
+  }
 
   const ROWS = [
     { key: 'llm', name: 'Google Gemini 2.5 Pro', desc: 'All six agents. Structured output via response_schema.', env: 'GOOGLE_API_KEY or USE_VERTEX' },
@@ -405,6 +421,39 @@ export function Integrations() {
           )
         })}
       </div>
+
+      <Card>
+        <CardHeader>
+          <Layers className="h-4 w-4 text-brand" />
+          <CardTitle>Stitch diagnostics</CardTitle>
+          <Button size="sm" variant="secondary" className="ml-auto" onClick={runProbe} loading={probing}>
+            Test Stitch
+          </Button>
+        </CardHeader>
+        <CardBody>
+          <p className="text-[12px] text-muted">
+            Generates one throwaway screen and prints exactly what Stitch sends back — the tools it
+            exposes, the raw responses, and whether an image was found by either route (a download URL
+            or an inline base64 block). If screens are not rendering, this says why.
+          </p>
+          {probe && (
+            <>
+              <div className={cn('mt-3 rounded-lg px-3 py-2 text-[12px] font-medium',
+                probe.extracted?.screenshot ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning')}>
+                {probe.verdict || probe.error || 'No verdict returned.'}
+              </div>
+              <pre className="mt-3 max-h-80 overflow-auto rounded-lg bg-ink/95 p-3 font-mono text-[10.5px]
+                              leading-relaxed text-white/90">
+{JSON.stringify(probe, null, 2)}
+              </pre>
+              <p className="mt-2 text-[11px] text-muted">
+                Screenshot this panel if screens still are not rendering — it contains everything needed
+                to map the response.
+              </p>
+            </>
+          )}
+        </CardBody>
+      </Card>
 
       {ints.model && (
         <Card>

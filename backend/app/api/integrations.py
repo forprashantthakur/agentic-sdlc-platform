@@ -192,7 +192,7 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
     times — the screenshot URL was never where I expected it. A probe that prints reality is worth
     more than a fourth guess, and it means the next person to hit this does not repeat the exercise.
     """
-    from app.adapters.stitch import TOOLS, StitchAdapter, _artifacts
+    from app.adapters.stitch import TOOLS, StitchAdapter, _artifacts, _inline_image
 
     adapter = registry.wireframer()
     if not isinstance(adapter, StitchAdapter):
@@ -213,17 +213,43 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
         out["generate_screen_raw"] = gen
         sid = gen.get("screen_id") or gen.get("id") or gen.get("screenId", "")
 
-        if sid:
-            out["get_screen_raw"] = adapter.mcp.call(
-                TOOLS["get_screen"], {"project_id": pid, "screen_id": sid}, operation="get_screen",
-            )
+        out["tools_available"] = sorted(adapter.mcp.list_tools())
 
-        html, shot = _artifacts({**gen, **out.get("get_screen_raw", {})})
-        out["extracted"] = {"html_url": html or None, "screenshot_url": shot or None}
-        out["verdict"] = ("Extraction works — screens will render."
+        if sid:
+            try:
+                out["get_screen_raw"] = adapter.mcp.call(
+                    TOOLS["get_screen"], {"project_id": pid, "screen_id": sid},
+                    operation="get_screen",
+                )
+            except Exception as e:
+                out["get_screen_error"] = f"{type(e).__name__}: {e}"
+
+            # The other contract: the PNG itself, base64, in an MCP image block. A base64 block
+            # contains no "http" string, so the URL walker discards it in silence — which is exactly
+            # how five screens generated correctly and every preview came back empty.
+            try:
+                img = adapter.mcp.call(
+                    TOOLS["get_screen_image"], {"project_id": pid, "screen_id": sid},
+                    operation="get_screen_image", fuzzy=False,
+                )
+                out["get_screen_image_keys"] = sorted(img.keys())
+                inline = _inline_image(img)
+                out["get_screen_image_inline"] = (inline[:64] + "…") if inline else None
+            except Exception as e:
+                out["get_screen_image_error"] = f"{type(e).__name__}: {e}"
+                inline = ""
+
+        merged = {**gen, **out.get("get_screen_raw", {})}
+        html, shot = _artifacts(merged)
+        shot = shot or (inline if sid else "")
+        out["extracted"] = {
+            "html_url": html or None,
+            "screenshot": ("base64 image block" if shot.startswith("data:") else shot) or None,
+        }
+        out["verdict"] = ("Extraction works — screens will render in the app and in the exports."
                           if shot else
-                          "No image URL found anywhere in the response. Send me create/generate/get "
-                          "raw output above and I will map it.")
+                          "No image found by EITHER route (URL walk or base64 block). Send this whole "
+                          "payload and I will map it in one pass — no more guessing.")
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
     return out
