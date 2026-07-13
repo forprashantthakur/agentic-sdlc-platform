@@ -192,11 +192,30 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
     times — the screenshot URL was never where I expected it. A probe that prints reality is worth
     more than a fourth guess, and it means the next person to hit this does not repeat the exercise.
     """
-    from app.adapters.stitch import TOOLS, StitchAdapter, _artifacts, _inline_image, _res_id
+    from app.adapters.stitch import TOOLS, StitchAdapter, _artifacts, _ids, _inline_image, _res_id
 
     adapter = registry.wireframer()
     if not isinstance(adapter, StitchAdapter):
         raise HTTPException(400, "Stitch is not the active provider, or it is mocked.")
+
+    def paths(obj: Any, prefix: str = "") -> dict[str, str]:
+        """Every leaf key path, with a short preview of its value.
+
+        The raw dumps are so verbose they scroll the answer off the screen — my probe was hiding its
+        own finding. A key map fits in a screenshot, which is the only interface that has actually
+        worked in this debugging loop.
+        """
+        flat: dict[str, str] = {}
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                flat.update(paths(v, f"{prefix}.{k}" if prefix else k))
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj[:3]):
+                flat.update(paths(v, f"{prefix}[{i}]"))
+        else:
+            v = str(obj)
+            flat[prefix] = (v[:70] + "…") if len(v) > 70 else v
+        return flat
 
     out: dict[str, Any] = {"server": settings.stitch_mcp_url}
     try:
@@ -208,8 +227,18 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
 
         gen = adapter.mcp.call(
             TOOLS["generate_screen"],
-            {"project_id": pid, "prompt": prompt, "device_type": "MOBILE"},
+            {**_ids(pid), "prompt": prompt, "device_type": "MOBILE"},
             operation="generate_screen",
+        )
+        out["generate_screen_schema"] = sorted(
+            (adapter.mcp.schema_of(
+                adapter.mcp.resolve(TOOLS["generate_screen"], "generate_screen") or ""
+            ).get("properties") or {}).keys()
+        )
+        out["get_screen_schema"] = sorted(
+            (adapter.mcp.schema_of(
+                adapter.mcp.resolve(TOOLS["get_screen"], "get_screen") or ""
+            ).get("properties") or {}).keys()
         )
         out["generate_screen_raw"] = gen
         sid = _res_id(gen, "screen")
@@ -220,8 +249,7 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
         if sid:
             try:
                 out["get_screen_raw"] = adapter.mcp.call(
-                    TOOLS["get_screen"], {"project_id": pid, "screen_id": sid},
-                    operation="get_screen",
+                    TOOLS["get_screen"], _ids(pid, sid), operation="get_screen",
                 )
             except Exception as e:
                 out["get_screen_error"] = f"{type(e).__name__}: {e}"
@@ -231,7 +259,7 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
             # how five screens generated correctly and every preview came back empty.
             try:
                 img = adapter.mcp.call(
-                    TOOLS["get_screen_image"], {"project_id": pid, "screen_id": sid},
+                    TOOLS["get_screen_image"], _ids(pid, sid),
                     operation="get_screen_image", fuzzy=False,
                 )
                 out["get_screen_image_keys"] = sorted(img.keys())
@@ -240,6 +268,10 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
             except Exception as e:
                 out["get_screen_image_error"] = f"{type(e).__name__}: {e}"
                 inline = ""
+
+        # LEAD with the map. The raw payloads go last, where they can scroll away harmlessly.
+        out["KEY_MAP_generate_screen"] = paths(gen)
+        out["KEY_MAP_get_screen"] = paths(out.get("get_screen_raw", {}))
 
         merged = {**gen, **out.get("get_screen_raw", {})}
         html, shot = _artifacts(merged)

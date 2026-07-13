@@ -43,6 +43,13 @@ TOOLS: dict[str, list[str]] = {
     #   get_screen_image  -> the PNG itself, base64, in an MCP image content block
     # A base64 block contains no "http" string, so the URL-walker discarded it without a word.
     # That is why five screens generated correctly and every preview came back empty.
+    # NOTE: the live server exposes NO get_screen_image tool. Its full tool list is:
+    #   apply_design_system, create_design_system, create_design_system_from_design_md,
+    #   create_project, delete_project, edit_screens, generate_screen_from_text, generate_variants,
+    #   get_project, get_screen, list_design_systems, list_projects, update_design_system,
+    #   upload_design_md
+    # So the screenshot can only arrive via get_screen. Kept as a candidate list because a future
+    # server may add it, but its absence is now expected rather than an error.
     "get_screen_image": ["get_screen_image", "get_screenshot", "screen_image", "get_screen_png"],
     # Creating a design system and APPLYING one to existing screens are different tools with
     # different arguments. Conflating them (via a fuzzy match) is what silently killed the whole
@@ -139,7 +146,7 @@ class StitchAdapter:
         for sc in screens:
             res = self.mcp.call(
                 TOOLS["generate_screen"],
-                {"project_id": project_id,
+                {**_ids(project_id),
                  "prompt": _prompt_for(sc, design_system),
                  "device_type": _device_type(design_system)},
                 operation="generate_screen",
@@ -157,9 +164,7 @@ class StitchAdapter:
                 # Generation may return only an id; the artifacts come from a second call.
                 try:
                     full = self.mcp.call(
-                        TOOLS["get_screen"],
-                        {"project_id": project_id, "screen_id": screen_id},
-                        operation="get_screen",
+                        TOOLS["get_screen"], _ids(project_id, screen_id), operation="get_screen",
                     )
                     h2, s2 = _artifacts(full)
                     html, shot = html or h2, shot or s2
@@ -170,10 +175,8 @@ class StitchAdapter:
             if screen_id and not shot:
                 try:
                     img = self.mcp.call(
-                        TOOLS["get_screen_image"],
-                        {"project_id": project_id, "screen_id": screen_id},
-                        operation="get_screen_image",
-                        fuzzy=False,
+                        TOOLS["get_screen_image"], _ids(project_id, screen_id),
+                        operation="get_screen_image", fuzzy=False,
                     )
                     shot = _inline_image(img) or _artifacts(img)[1]
                 except Exception as e:
@@ -220,6 +223,28 @@ def _device_type(design_system: str) -> str:
             return v
     return "AGNOSTIC"
 
+
+
+
+def _ids(project_id: str = "", screen_id: str = "") -> dict[str, Any]:
+    """Every plausible spelling of "which project / which screen".
+
+    Stitch is a Google API: `get_screen` may want a resource name (`projects/1/screens/2`), or a
+    parent plus an id, or flat snake_case. I do not know which, and I have guessed wrong five times
+    already. adapt_args() reads the tool's own inputSchema and DROPS every property the tool does not
+    declare — so offering all the aliases is safe by construction, and the tool picks the one it
+    actually wants. This is cheaper and more honest than another guess.
+    """
+    out: dict[str, Any] = {}
+    if project_id:
+        out |= {"project_id": project_id, "projectId": project_id,
+                "project": f"projects/{project_id}", "parent": f"projects/{project_id}"}
+    if screen_id:
+        full = f"projects/{project_id}/screens/{screen_id}"
+        out |= {"screen_id": screen_id, "screenId": screen_id, "screen": full, "name": full}
+    elif project_id:
+        out["name"] = f"projects/{project_id}"
+    return out
 
 
 def _res_id(obj: dict[str, Any], kind: str) -> str:
