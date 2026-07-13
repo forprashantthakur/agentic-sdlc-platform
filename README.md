@@ -400,3 +400,49 @@ and are mathematically meaningless against each other. A project seeded in mock 
 queried live will retrieve near-random chunks, and the agents will ground requirements in noise —
 **with citations that look perfectly plausible and are wrong.** Re-index every project that existed
 before you flipped the switch, or just delete them and re-seed.
+
+
+---
+
+## Wireframes: Google Stitch (default) or Figma
+
+Agent 3 is provider-agnostic. It produces a structured screen spec — screens, components, the
+requirement each screen traces to, and a plain-English prompt — and a provider renders it.
+
+```bash
+WIREFRAME_PROVIDER=stitch     # or: figma | mock
+STITCH_API_KEY=<key>
+STITCH_MCP_URL=https://stitch.withgoogle.com/mcp
+```
+
+Then verify before you run a job:
+
+```
+GET /api/integrations/wireframes/tools
+```
+
+It calls `tools/list` on the provider's MCP server and reports which logical operations
+(`create_project`, `generate_screen`, `get_screen`) it could actually resolve. `missing_operations`
+empty means Agent 3 will render real screens on the next run.
+
+### Why Stitch is the default now
+
+| | Stitch | Figma |
+|---|---|---|
+| **Input** | Text — exactly what Agent 3 produces | Geometry — we would be inventing x/y coordinates for a model to draw |
+| **Output** | HTML **and a screenshot** — embeddable in the BRD | Frames in a Figma file, behind a link |
+| **Cost** | Free in Google Labs (monthly caps) | **Full seat on a paid plan**, plus usage billing |
+| **Who can see it** | Anyone who opens the document | Anyone with a Figma seat |
+
+The screenshot mattering more than it sounds: a wireframe a business sponsor can see **inside the
+BRD they are already reading** gets looked at. A Figma link they need a seat to open does not.
+
+Figma remains supported — set `WIREFRAME_PROVIDER=figma` — for the case where the frames genuinely
+need to live in the file your designers already work in.
+
+### What does not change
+
+The **spec** is the artifact, not the picture. Agent 4 consumes the structured screen spec, never
+the rendered image. So a provider outage, an expired key, or a monthly cap degrades to
+*"spec produced, screens pending"* — the run completes, the BRD is still written, and the wireframes
+can be re-rendered later. A wireframe generator is never allowed to fail a requirements run.

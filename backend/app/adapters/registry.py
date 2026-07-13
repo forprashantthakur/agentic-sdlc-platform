@@ -10,6 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.adapters.figma_mcp import FigmaMCPAdapter, MockFigmaAdapter
+from app.adapters.stitch import MockStitchAdapter, StitchAdapter
 from app.adapters.gdrive import DriveAdapter, MockDriveAdapter
 from app.adapters.gmail import GmailAdapter, MockGmailAdapter
 from app.adapters.jira import JiraAdapter, MockJiraAdapter
@@ -22,6 +23,27 @@ def figma():
     if settings.is_mocked("figma") or not settings.figma_token:
         return MockFigmaAdapter()
     return FigmaMCPAdapter(settings.figma_mcp_url, settings.figma_token)
+
+
+@lru_cache
+def stitch():
+    if settings.is_mocked("stitch") or not settings.stitch_api_key:
+        return MockStitchAdapter()
+    return StitchAdapter(settings.stitch_mcp_url, settings.stitch_api_key)
+
+
+@lru_cache
+def wireframer():
+    """Agent 3's provider. Stitch by default; Figma if you specifically want frames in a Figma file.
+
+    Both satisfy the same port, so Agent 3 does not know or care which one it is talking to.
+    """
+    provider = (settings.wireframe_provider or "stitch").lower()
+    if provider == "figma":
+        return figma()
+    if provider == "mock":
+        return MockStitchAdapter()
+    return stitch()
 
 
 @lru_cache
@@ -55,6 +77,8 @@ def describe() -> dict[str, str]:
     d = {
         "llm": "live" if gemini().live else "mock",
         "model": gemini().model_name,
+        "wireframe_provider": settings.wireframe_provider,
+        "wireframes": name(wireframer()),
         "figma": name(figma()),
         "gmail": name(mail()),
         "drive": name(drive()),

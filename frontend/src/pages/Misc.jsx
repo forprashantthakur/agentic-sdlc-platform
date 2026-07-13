@@ -340,7 +340,8 @@ export function Integrations() {
 
   const ROWS = [
     { key: 'llm', name: 'Google Gemini 2.5 Pro', desc: 'All six agents. Structured output via response_schema.', env: 'GOOGLE_API_KEY or USE_VERTEX' },
-    { key: 'figma', name: 'Figma (MCP)', desc: 'Agent 3 authors wireframe frames. Needs a Full seat on a paid plan.', env: 'FIGMA_TOKEN + FIGMA_MCP_URL' },
+    { key: 'wireframes', name: 'Google Stitch (MCP)', desc: 'Agent 3 generates screens from text and gets back HTML + a screenshot, embeddable in the BRD. Free in Google Labs.', env: 'STITCH_API_KEY + WIREFRAME_PROVIDER=stitch' },
+    { key: 'figma', name: 'Figma (MCP) — alternative', desc: 'Draws frames in a Figma file instead. Wants geometry, and needs a Full seat on a paid plan.', env: 'FIGMA_TOKEN + WIREFRAME_PROVIDER=figma' },
     { key: 'gmail', name: 'Gmail API', desc: 'Agent 5 sends threaded approval emails and parses replies.', env: 'GOOGLE_SA_JSON' },
     { key: 'drive', name: 'Google Drive', desc: 'Approved artifacts pushed as Google Docs.', env: 'GDRIVE_ROOT_FOLDER_ID' },
     { key: 'jira', name: 'Jira', desc: 'Agent 6 creates epics and stories with traceability labels.', env: 'JIRA_TOKEN + JIRA_BASE_URL' },

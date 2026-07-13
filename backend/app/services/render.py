@@ -68,9 +68,22 @@ def render_wireframe(p: dict[str, Any]) -> str:
                    [[c["type"], c.get("label", ""), ", ".join(f"{k}={v}" for k, v in (c.get("props") or {}).items())]
                     for c in sc.get("components", [])]),
               "", f"**Traces to:** {', '.join(sc.get('requirement_ids', []))}", ""]
-    if p.get("figma"):
-        f = p["figma"]
-        s += ["## Figma", "", f"- File: {f.get('file_url','')}", f"- Frames: {', '.join(f.get('frames', []))}", ""]
+    wf = p.get("wireframes") or p.get("figma")
+    if wf:
+        provider = (wf.get("provider") or "figma").title()
+        s += [f"## Generated screens — {provider}", ""]
+        if wf.get("error"):
+            s += [f"> Screens pending: {wf['error']}", ""]
+        else:
+            if wf.get("project_url") or wf.get("file_url"):
+                s += [f"- Project: {wf.get('project_url') or wf.get('file_url')}", ""]
+            if wf.get("screens"):
+                s += [_tbl(["Screen", "Traces to", "Preview", "Link"],
+                           [[sc["name"], ", ".join(sc.get("requirement_ids", [])),
+                             f"![{sc['name']}]({sc['screenshot_url']})" if sc.get("screenshot_url") else "—",
+                             sc.get("url", "—")] for sc in wf["screens"]]), ""]
+            elif wf.get("frames"):
+                s += [f"- Frames: {', '.join(wf['frames'])}", ""]
     if p.get("notes"):
         s += ["## Notes", "", p["notes"], ""]
     return "\n".join(s)

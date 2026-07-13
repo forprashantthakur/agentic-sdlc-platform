@@ -43,15 +43,10 @@ class FigmaMCPAdapter:
     """JSON-RPC 2.0 over Streamable HTTP against the Figma MCP server."""
 
     def __init__(self, url: str, token: str) -> None:
+        from app.adapters.mcp import McpClient
+
+        self.mcp = McpClient(url, token=token)
         self.url = url
-        self.headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-        }
-        if token:
-            self.headers["Authorization"] = f"Bearer {token}"
-        self._id = 0
-        self._tools: dict[str, dict] | None = None
 
     # ── JSON-RPC plumbing ─────────────────────────────────────────────────────
     def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:

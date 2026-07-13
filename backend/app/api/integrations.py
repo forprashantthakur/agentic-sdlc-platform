@@ -10,6 +10,45 @@ from app.llm.gemini import gemini
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
 
+@router.get("/wireframes/tools")
+def wireframe_tools():
+    """Dump the active wireframe provider's advertised MCP tools.
+
+    Tool names are server-, version- and plan-dependent. Guessing them is how you get a
+    'method not found' at 2am. Point the adapter at the real server, call this, and read the
+    mapping off reality.
+    """
+    adapter = registry.wireframer()
+    provider = settings.wireframe_provider
+
+    if type(adapter).__name__.startswith("Mock"):
+        raise HTTPException(
+            400,
+            f"Wireframes are mocked (provider={provider}). For Stitch: set STITCH_API_KEY and "
+            "STITCH_MOCK=false. For Figma: set FIGMA_TOKEN and FIGMA_MOCK=false.",
+        )
+    try:
+        tools = adapter.list_tools(refresh=True)
+    except Exception as e:
+        raise HTTPException(502, f"Could not reach the {provider} MCP server: {e}") from e
+
+    from app.adapters.stitch import TOOLS as STITCH_TOOLS
+
+    resolved = {}
+    if provider == "stitch":
+        resolved = {op: adapter.mcp.resolve(names, op) for op, names in STITCH_TOOLS.items()}
+
+    return {
+        "provider": provider,
+        "server": settings.stitch_mcp_url if provider == "stitch" else settings.figma_mcp_url,
+        "tool_count": len(tools),
+        "tools": [{"name": n, "description": (t.get("description") or "")[:200],
+                   "input_schema": t.get("inputSchema")} for n, t in sorted(tools.items())],
+        "resolved_operations": resolved,
+        "missing_operations": [op for op, name in resolved.items() if name is None],
+    }
+
+
 @router.get("/figma/tools")
 def figma_tools():
     """Dump the Figma MCP server's advertised tool list.

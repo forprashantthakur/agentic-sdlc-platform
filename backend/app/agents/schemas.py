@@ -70,6 +70,9 @@ WIREFRAME = _req(
     {
         "screens": {"type": "array", "items": _req(
             {"name": _STR, "purpose": _STR,
+             # The prompt Stitch generates the screen from. The structured component list below is
+             # still the contract — this is prose for the generator, not a substitute for the spec.
+             "stitch_prompt": _STR,
              "components": {"type": "array", "items": _req(
                  {"type": _STR, "label": _STR, "props": {"type": "object"}}, ["type", "label"])},
              "requirement_ids": _STRS},

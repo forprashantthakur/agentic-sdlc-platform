@@ -33,7 +33,17 @@ class Settings(BaseSettings):
     vertex_project: str = ""
     vertex_location: str = "asia-south1"
 
-    figma_mcp_url: str = "http://figma-mcp:3845/mcp"
+    # Agent 3's wireframe provider: "stitch" | "figma" | "mock".
+    # Stitch is the default: it generates a screen FROM TEXT — which is exactly what Agent 3 already
+    # produces — returns HTML and a screenshot that can be embedded straight into the BRD, and needs
+    # no paid seat. Figma's write-to-canvas wants geometry and a Full seat on a paid plan.
+    wireframe_provider: str = "stitch"
+
+    stitch_mcp_url: str = "https://stitch.withgoogle.com/mcp"
+    stitch_api_key: str = ""
+    stitch_mock: bool | None = None
+
+    figma_mcp_url: str = "https://mcp.figma.com/mcp"
     figma_token: str = ""
     figma_team_id: str = ""
 
