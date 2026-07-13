@@ -37,7 +37,8 @@ export default function AppShell({ children, pending = 0, project, health }) {
     <div className="min-h-screen bg-bg text-ink flex">
       <aside className={cn('sticky top-0 h-screen shrink-0 border-r border-line bg-surface flex flex-col transition-[width] duration-200',
         collapsed ? 'w-[68px]' : 'w-[248px]')}>
-        <div className={cn('h-16 flex items-center border-b border-line', collapsed ? 'justify-center px-2' : 'px-3')}>
+        <div className={cn('flex shrink-0 items-center border-b border-line',
+          collapsed ? 'h-16 justify-center px-2' : 'h-[76px] px-3')}>
           <BrandLogo collapsed={collapsed} />
         </div>
 
@@ -96,7 +97,7 @@ export default function AppShell({ children, pending = 0, project, health }) {
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="sticky top-0 z-30 h-16 shrink-0 border-b border-line bg-surface/80 backdrop-blur-md flex items-center gap-4 px-6">
+        <header className="sticky top-0 z-30 h-[76px] shrink-0 border-b border-line bg-surface/80 backdrop-blur-md flex items-center gap-4 px-6">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
             <input placeholder="Search projects, requirements, documents…"
@@ -129,7 +130,7 @@ export default function AppShell({ children, pending = 0, project, health }) {
             {copilot && (
               <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 372, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }} transition={{ type: 'spring', stiffness: 260, damping: 30 }}
-                className="sticky top-16 h-[calc(100vh-4rem)] shrink-0 border-l border-line bg-surface overflow-hidden hidden xl:block">
+                className="sticky top-[76px] h-[calc(100vh-76px)] shrink-0 border-l border-line bg-surface overflow-hidden hidden xl:block">
                 <div className="w-[372px] h-full"><Copilot project={project} /></div>
               </motion.aside>
             )}

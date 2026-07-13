@@ -49,18 +49,20 @@ export default function BrandLogo({ collapsed = false }) {
 
   if (noFull) return <Fallback />
 
+  // Stacked, not side by side. The sidebar is 248px: a 130px logo plate plus a text block leaves
+  // the label ~70px, which truncates to "Agentic S…". Stacking gives the wordmark its full width
+  // and the label a whole line — nothing is cropped, and the logo is bigger for it.
   return (
-    <div className="flex min-w-0 items-center gap-2.5">
+    <div className="flex min-w-0 flex-col gap-1">
       {/* The logo is designed for a white field. Recolouring or reversing a trademark is normally a
           brand-guideline violation; giving it the background it was made for is not — so it sits on
           a white plate in both light and dark themes. */}
-      <div className="flex h-10 items-center rounded-lg bg-white px-2 shadow-sm ring-1 ring-line/60">
-        <Asset name="hdfc-logo" className="h-6 w-auto max-w-[130px] object-contain"
+      <div className="flex h-9 w-fit items-center rounded-lg bg-white px-2.5 shadow-sm ring-1 ring-line/60">
+        <Asset name="hdfc-logo" className="h-[22px] w-auto max-w-[172px] object-contain"
                onExhausted={() => setNoFull(true)} />
       </div>
-      <div className="min-w-0 leading-tight">
-        <div className="truncate text-[11px] font-semibold text-ink">Agentic SDLC</div>
-        <div className="truncate text-[10px] text-muted">Platform</div>
+      <div className="whitespace-nowrap text-[10.5px] font-medium tracking-wide text-muted">
+        Agentic SDLC Platform
       </div>
     </div>
   )
