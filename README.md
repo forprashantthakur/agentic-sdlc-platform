@@ -644,3 +644,19 @@ and the console showed nothing but "agent1_requirements started". Three minutes 
 looked exactly like a hang, which in a demo is worse than an error: an error you can explain. The
 timeline now says *"Model unavailable — backing off 16s and retrying (attempt 3 of 5)"*, and every
 agent reports how long it took.
+
+
+### Truncation is not overload, and needs the opposite response
+
+Two failures that look alike in a log and are nothing alike:
+
+- **Overload (503).** Wait, then repeat the *identical* request. It will work.
+- **Truncation (`MAX_TOKENS`).** Waiting changes nothing. The same request with the same budget will
+  run out of room in exactly the same place, five times over.
+
+My retry policy originally treated them the same, so a truncated generation burned five attempts
+proving what the first one had already proved. Now the client **doubles its output budget on each
+truncation** (up to a 65,536-token ceiling) and reports it on the timeline. If it still does not fit
+at the ceiling, it says so plainly: *that is not a budget problem — the generation is too large.*
+
+`MAX_OUTPUT_TOKENS` (default 32,768) is the **starting** budget, not the limit.

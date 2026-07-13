@@ -68,6 +68,9 @@ class TransientError(RuntimeError):
     """
 
 
+# The hard ceiling on a single generation. Beyond this the problem is the ask, not the budget.
+MAX_BUDGET = 65536
+
 PERMANENT = ("limit: 0", "NOT_FOUND", "no longer available", "API key not valid",
              "PERMISSION_DENIED", "billing")
 TRANSIENT = ("UNAVAILABLE", "503", "overloaded", "high demand", "500", "INTERNAL",
@@ -104,7 +107,7 @@ class GeminiClient:
         if not self.live:
             return mock_json(task=task, prompt=prompt, schema=schema)
 
-        raw = self._call(
+        raw = self._call_escalating(
             model=model or settings.gemini_model,
             system=system, prompt=prompt, temperature=temperature,
             json_schema=schema, task=task,
@@ -121,7 +124,7 @@ class GeminiClient:
     ) -> str:
         if not self.live:
             return mock_text(task=task, prompt=prompt)
-        return self._call(
+        return self._call_escalating(
             model=model or settings.gemini_flash_model,
             system=system, prompt=prompt, temperature=temperature, task=task,
         )
@@ -158,27 +161,53 @@ class GeminiClient:
         return vectors
 
     # ── internals ─────────────────────────────────────────────────────────────
+    def _call_escalating(self, **kw) -> str:
+        """Truncation is a different failure from overload, and needs a different response.
+
+        Overload: wait, then repeat the identical request — it will work.
+        Truncation: waiting changes nothing. Come back with a bigger budget, or admit it will
+        never fit.
+        """
+        for attempt in range(1, 5):
+            try:
+                return self._call(attempt=attempt, **kw)
+            except TruncatedResponse as e:
+                if attempt == 4:
+                    raise
+                progress.emit(str(e), level="warning")
+                log.warning("gemini.truncated", attempt=attempt, task=kw.get("task"))
+        raise RuntimeError("unreachable")
+
     @retry(
         # Five attempts with a real backoff: Gemini's overload spikes are usually seconds, not
         # minutes, and a six-agent run is far too expensive to abandon over one of them.
         stop=stop_after_attempt(5),
+        # `attempt` is threaded through so the call can escalate its own token budget on truncation.
         wait=wait_exponential(multiplier=2, min=4, max=45),
-        retry=retry_if_exception_type(
-            (TransientError, TruncatedResponse, json.JSONDecodeError, ConnectionError)
-        ),
+        # TruncatedResponse is NOT retried here — _call_escalating handles it, because a retry that
+        # changes nothing is not a retry.
+        retry=retry_if_exception_type((TransientError, json.JSONDecodeError, ConnectionError)),
         before_sleep=_report_retry,
         reraise=True,
     )
     def _call(
         self, *, model: str, system: str, prompt: str, temperature: float, task: str,
-        json_schema: dict | None = None,
+        json_schema: dict | None = None, attempt: int = 1,
     ) -> str:
         from google.genai import types
+
+        # Escalate the output budget on each truncation. Retrying an identical request that ran out
+        # of room will run out of room again, in exactly the same place, five times over. A retry
+        # that changes nothing is not a retry; it is a stutter, and it wastes a minute proving what
+        # the first attempt already proved.
+        budget = min(settings.max_output_tokens * (2 ** (attempt - 1)), MAX_BUDGET)
+        if attempt > 1:
+            log.info("gemini.budget_escalated", task=task, attempt=attempt, max_output_tokens=budget)
 
         cfg = types.GenerateContentConfig(
             system_instruction=system,
             temperature=temperature,
-            max_output_tokens=settings.max_output_tokens,
+            max_output_tokens=budget,
         )
         if json_schema is not None:
             # `response_json_schema` — NOT `response_schema`. The latter coerces a dict and
@@ -237,9 +266,16 @@ class GeminiClient:
         finish_name = getattr(finish, "name", str(finish or ""))
 
         if finish_name == "MAX_TOKENS":
+            if budget >= MAX_BUDGET:
+                # We have doubled to the ceiling and it still does not fit. Retrying further is
+                # theatre — say what is actually wrong.
+                raise RuntimeError(
+                    f"{task}: the output does not fit even at {MAX_BUDGET:,} tokens. This is not a "
+                    "budget problem — the generation is too large. Reduce the number of sources, or "
+                    "split the document."
+                )
             raise TruncatedResponse(
-                f"{task}: Gemini hit max_output_tokens ({settings.max_output_tokens}). The document "
-                "was cut off mid-object. Raise MAX_OUTPUT_TOKENS or split the generation."
+                f"{task}: output truncated at {budget:,} tokens. Retrying with {min(budget * 2, MAX_BUDGET):,}."
             )
         if finish_name in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"):
             raise RuntimeError(f"{task}: Gemini blocked the response (finish_reason={finish_name}).")

@@ -47,6 +47,8 @@ class Settings(BaseSettings):
 
     # Gemini 2.5 Pro can emit long documents. Agent 4's SRS is the biggest single generation;
     # too low a budget truncates it into unparseable JSON.
+    # The STARTING budget. On truncation the client doubles it (to a 65,536 ceiling) rather than
+    # retrying the identical request — a retry that changes nothing is not a retry.
     max_output_tokens: int = 32768
 
     # How many generations Agent 4 may run at once. Default 1: on a free-tier key, six concurrent
