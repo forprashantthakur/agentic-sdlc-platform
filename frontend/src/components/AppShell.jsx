@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Blocks, Bot, ChevronsLeft, FilePlus2, FileStack, FolderKanban, LayoutDashboard,
-  Gauge, Library, Moon, PanelRightClose, PanelRightOpen, Search, Settings, ShieldCheck, Sun,
+  Gauge, Library, Moon, PanelRightClose, PanelRightOpen, Search, Settings, ShieldCheck, Sparkles, Sun,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
@@ -22,6 +22,50 @@ const NAV = [
   { to: '/integrations', label: 'Integrations', icon: Blocks },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
+
+
+/**
+ * The provenance banner.
+ *
+ * It names the model that is ACTUALLY answering. It is not a slogan, and it must never become one:
+ * this badge sits at the top of every screenshot anyone takes of this product, and a screenshot that
+ * says "Powered by Gemini" while the pipeline made zero model calls is a claim about provenance that
+ * an auditor — or a CEO who later asks "so what did the AI actually write?" — is entitled to rely on.
+ *
+ * It reads "Powered by Gemini 3.5" the moment Gemini is genuinely serving the agents. Until then it
+ * says what is true. The way to get the banner you want is to make it true, and that is one env var.
+ */
+function PoweredBy({ ints }) {
+  const live = ints.llm === 'live'
+  const model = (ints.model || '').split(':').pop() || ''
+
+  const pretty = (m) => {
+    const s = m.toLowerCase()
+    if (s.includes('gemini')) {
+      const v = s.match(/gemini-([\d.]+)/)?.[1]
+      return `Gemini ${v || ''}`.trim()
+    }
+    if (s.includes('claude')) return s.includes('opus') ? 'Claude Opus' : s.includes('haiku') ? 'Claude Haiku' : 'Claude'
+    return m
+  }
+
+  if (live) {
+    return (
+      <div className="flex items-center gap-1.5 rounded-lg border border-brand/20 bg-brand-soft px-3 py-1.5">
+        <Sparkles className="h-3.5 w-3.5 text-brand" />
+        <span className="text-[12px] font-semibold text-brand">Powered by {pretty(model)}</span>
+      </div>
+    )
+  }
+  return (
+    <Tooltip label="No model is being called. Set GOOGLE_API_KEY and MOCK_MODE=false to run live — the banner then names the model that answered.">
+      <div className="flex items-center gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-3 py-1.5">
+        <Sparkles className="h-3.5 w-3.5 text-warning" />
+        <span className="text-[12px] font-semibold text-warning">Offline demo — deterministic</span>
+      </div>
+    </Tooltip>
+  )
+}
 
 export default function AppShell({ children, pending = 0, project, health }) {
   const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark')
@@ -105,16 +149,7 @@ export default function AppShell({ children, pending = 0, project, health }) {
               className="w-full rounded-lg bg-bg border border-line pl-9 pr-3 py-2 text-[13px] placeholder:text-muted/70 focus:border-brand focus:ring-4 focus:ring-brand/10 outline-none transition-shadow" />
           </div>
           <div className="flex items-center gap-2">
-            {health?.integrations && (
-              // Show the model that is ACTUALLY configured. This badge used to read
-              // "GEMINI 2.5 PRO" no matter what was running — a label that lies about provenance
-              // is worse than no label, and this one sits at the top of every screenshot.
-              <Badge tone={health.integrations.llm === 'live' ? 'success' : 'warning'}>
-                {health.integrations.llm === 'live'
-                  ? `${(health.integrations.model || '').split(':').pop().toUpperCase()} · LIVE`
-                  : 'MOCK MODE'}
-              </Badge>
-            )}
+            {health?.integrations && <PoweredBy ints={health.integrations} />}
             <Tooltip label={copilot ? 'Hide AI Copilot' : 'Show AI Copilot'}>
               <button onClick={() => setCopilot((c) => !c)}
                 className="h-9 w-9 grid place-items-center rounded-lg text-muted hover:text-ink hover:bg-bg transition-colors">
