@@ -23,6 +23,7 @@ export const api = {
   health: () => req('/health'),
   metrics: () => req('/api/metrics'),
   stitchProbe: () => req('/api/integrations/wireframes/probe'),
+  discoverySample: (pid) => req(`/api/projects/${pid}/discovery/sample`),
   stats: () => req('/api/dashboard/stats'),
   queue: () => req('/api/dashboard/queue'),
 

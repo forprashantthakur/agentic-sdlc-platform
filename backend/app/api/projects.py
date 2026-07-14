@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_session
+from app.discovery_samples import sample_for
 from app.core.logging import log
 from app.memory import rag
 from app.memory.vector_store import get_vector_store
@@ -351,3 +352,26 @@ def seed(key: str = "upi_autopay", db: Session = Depends(get_session)):
 def seed_all(db: Session = Depends(get_session)):
     """Seed the whole catalogue — five projects across five business units."""
     return [_out(db, _seed_one(db, key)) for key in CATALOG]
+
+
+@router.get("/{project_id}/discovery/sample")
+def discovery_sample(project_id: str, db: Session = Depends(get_session)):
+    """Pre-written interview answers for a seeded demo project.
+
+    Typing ten answers live in front of a CEO is a typing test, not a demo. These are consistent with
+    the project's seeded documents — same baselines, same regulator, same thresholds — because an
+    interview answer that contradicted the workshop minutes would surface downstream as a conflict
+    Agent 1 flags. Impressive if you meant it; embarrassing if you did not.
+    """
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    answers = sample_for(project.name)
+    if not answers:
+        raise HTTPException(
+            404,
+            f"No sample interview for '{project.name}'. Sample answers exist only for the seeded "
+            f"demo projects — a real project's interview is the user's to give.",
+        )
+    return {"project": project.name, "answers": answers}

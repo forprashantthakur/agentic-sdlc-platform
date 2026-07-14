@@ -1,4 +1,4 @@
-import { Bot, ClipboardList, Send, Sparkles } from 'lucide-react'
+import { Bot, ClipboardList, Send, Sparkles, Wand2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/utils'
@@ -28,6 +28,40 @@ export default function Discovery({ project, onNext, onBack }) {
   const endRef = useRef(null)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [thread, busy])
+
+  // One click fills the whole interview from the project's sample answers. Each answer is still
+  // indexed as a source, exactly as if it had been typed — so the citations downstream are real, not
+  // stagecraft. The 220ms stagger is deliberate: it reads as the interview being conducted rather
+  // than a form being stuffed, and it lets the audience see the thread build.
+  const autofill = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const { answers: sample } = await api.discoverySample(project.id)
+      for (const { section, answer } of sample) {
+        const q = INTERVIEW.find((x) => x.section === section)?.q || section
+        setThread((t) => [...t, { role: 'user', text: answer }])
+        setAnswers((a) => ({ ...a, [section]: answer }))
+        try {
+          await api.addSource(project.id, {
+            kind: 'MEETING_NOTES',
+            title: `Discovery interview — ${section}`,
+            content: `Q: ${q}\nA: ${answer}`,
+          })
+        } catch { /* non-fatal */ }
+        await new Promise((r) => setTimeout(r, 220))
+      }
+      setI(INTERVIEW.length)
+      setThread((t) => [...t, {
+        role: 'ai', done: true,
+        text: 'Interview complete — filled from this project\'s sample answers. Every one is indexed as evidence, so the agents cite it exactly as they would a typed answer. Ready for AI Analysis.',
+      }])
+    } catch (e) {
+      setThread((t) => [...t, { role: 'ai', text: `No sample interview for this project — ${e.message}` }])
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const submit = async () => {
     const text = draft.trim()
@@ -82,7 +116,16 @@ export default function Discovery({ project, onNext, onBack }) {
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card className="flex flex-col">
-          <CardHeader><Sparkles className="h-4 w-4 text-brand" /><CardTitle>Discovery interview</CardTitle></CardHeader>
+          <CardHeader>
+            <Sparkles className="h-4 w-4 text-brand" />
+            <CardTitle>Discovery interview</CardTitle>
+            {i < INTERVIEW.length && (
+              <Button size="sm" variant="secondary" className="ml-auto" onClick={autofill} loading={busy}>
+                <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                Fill sample answers
+              </Button>
+            )}
+          </CardHeader>
           <CardBody className="flex-1 space-y-3 max-h-[480px] overflow-y-auto">
             {thread.map((m, k) => (
               <div key={k} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
