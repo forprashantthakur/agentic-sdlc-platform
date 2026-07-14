@@ -230,7 +230,13 @@ export default function Review({ project, onNext, onBack, onWatchRun }) {
                     )}
                   </div>
                 </div>
-                <div className="shrink-0"><Confidence value={r.confidence} /></div>
+                {/* Confidence deliberately not shown. In offline mode it was 0.84 + a hash of the
+                    statement; live, it is the model's own self-report, which is uncalibrated and
+                    reliably over-confident. A precise-looking percentage that cannot survive the
+                    question "so is an 87% requirement wrong 13% of the time?" is worse than no
+                    number at all. The VALUE is still computed and still drives the low-confidence
+                    risk flag (<0.75) in the concept note — it just no longer masquerades as a
+                    measurement on screen. */}
               </div>
             </div>
           ))}

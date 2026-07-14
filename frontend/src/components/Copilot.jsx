@@ -219,12 +219,16 @@ function Insights({ insights, project }) {
     <div className="space-y-4">
       <div className="rounded-xl border border-line bg-surface p-3.5">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Extraction confidence</span>
-          <Confidence value={insights.mean_confidence} />
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Evidence coverage</span>
         </div>
         <p className="text-[11.5px] text-muted leading-snug">
-          Mean confidence across {insights.requirement_count} extracted requirements. Anything below
-          80% is flagged here and should be confirmed with the business.
+          {insights.requirement_count} requirement{insights.requirement_count === 1 ? '' : 's'} extracted,
+          every one traced to a cited line in a source document.
+          {insights.low_confidence?.length > 0 && (
+            <> {insights.low_confidence.length} rest{insights.low_confidence.length === 1 ? 's' : ''} on
+            contested or thin evidence — confirm {insights.low_confidence.length === 1 ? 'it' : 'those'} with
+            the business before sign-off.</>
+          )}
         </p>
       </div>
 

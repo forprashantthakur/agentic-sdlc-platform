@@ -24,8 +24,8 @@ def render_requirements(p: dict[str, Any]) -> str:
     s = ["# Structured Business Requirements", "", f"_{p.get('summary','')}_", ""]
     s += ["## Requirements", ""]
     s += [_tbl(
-        ["ID", "Title", "Category", "Priority", "Confidence", "Statement", "Evidence"],
-        [[r["id"], r["title"], r["category"], r["priority"], f"{r.get('confidence', 0):.2f}",
+        ["ID", "Title", "Category", "Priority", "Statement", "Evidence"],
+        [[r["id"], r["title"], r["category"], r["priority"],
           r["statement"], "; ".join(r.get("source_evidence", []))] for r in p.get("requirements", [])],
     ), ""]
     if p.get("stakeholders"):
