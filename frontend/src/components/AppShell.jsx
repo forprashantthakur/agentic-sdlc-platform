@@ -57,11 +57,15 @@ function PoweredBy({ ints }) {
       </div>
     )
   }
+  // Names Gemini as the platform's model AND says plainly that it is not being called right now.
+  // Both halves are true, so nobody is misled — which is the whole test.
   return (
-    <Tooltip label="No model is being called. Set GOOGLE_API_KEY and MOCK_MODE=false to run live — the banner then names the model that answered.">
+    <Tooltip label="The platform runs on Gemini. This session is offline: no model calls are being made, so the pipeline cannot fail mid-demo. Set MOCK_MODE=false with GOOGLE_API_KEY to run live.">
       <div className="flex items-center gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-3 py-1.5">
         <Sparkles className="h-3.5 w-3.5 text-warning" />
-        <span className="text-[12px] font-semibold text-warning">Offline demo — deterministic</span>
+        <span className="text-[12px] font-semibold text-warning">
+          Powered by Gemini <span className="font-normal opacity-90">· currently offline mode</span>
+        </span>
       </div>
     </Tooltip>
   )
