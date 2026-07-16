@@ -31,7 +31,7 @@ Head of Treasury`,
  * showing what the Requirement Gathering agent detected. A human accepts before the pipeline runs —
  * an inbound email is untrusted, so it earns a review step, not a straight line to a spend.
  */
-export default function Intake() {
+export default function Intake({ setProject, setRun }) {
   const nav = useNavigate()
   const toast = useToast()
   const [form, setForm] = useState({ from: '', subject: '', body: '' })
@@ -71,9 +71,14 @@ export default function Intake() {
     try {
       const list = approvers.split(',').map((s) => s.trim()).filter(Boolean)
       const r = await api.intakeAccept(d.id, { approvers: list, base_url: window.location.origin })
-      toast(`Pipeline started for "${d.name}"`, { detail: 'The Requirement Gathering agent is extracting now.', tone: 'success' })
+      // Hand the just-started run to the app so the live 6-agent view can attach to it, then land
+      // on the same AI-Analysis step the in-app flow shows — email and in-app converge here.
+      const proj = await api.project(d.id).catch(() => ({ id: d.id, name: d.name }))
+      setProject?.(proj)
+      setRun?.({ id: r.run_id, status: 'RUNNING' })
+      toast(`Pipeline started for "${d.name}"`, { detail: 'Watch the agents run — it will pause at Gate 1 for sign-off.', tone: 'success' })
       load()
-      nav('/review')
+      nav('/new', { state: { step: 'analysis', completed: ['context', 'ingestion', 'discovery'] } })
       return r
     } catch (e) {
       toast('Could not start the pipeline', { detail: e.message, tone: 'error' })
