@@ -14,6 +14,7 @@ function Shell() {
   const [run, setRun] = useState(null)
   const [health, setHealth] = useState(null)
   const [pending, setPending] = useState(0)
+  const [intakeCount, setIntakeCount] = useState(0)
   const [library, setLibrary] = useState(false)
   const toast = useToast()
   const nav = useNavigate()
@@ -22,15 +23,17 @@ function Shell() {
 
   // The approval count is the one number a reviewer looks for — keep it fresh.
   useEffect(() => {
-    const tick = () =>
+    const tick = () => {
+      api.intakeQueue().then((q) => setIntakeCount(q.length)).catch(() => {})
       api.approvals().then((a) => setPending(a.filter((x) => x.status === 'PENDING').length)).catch(() => {})
+    }
     tick()
     const t = setInterval(tick, 8000)
     return () => clearInterval(t)
   }, [])
 
   return (
-    <AppShell pending={pending} project={project} health={health}>
+    <AppShell pending={pending} intakeCount={intakeCount} project={project} health={health}>
       <DemoLibrary
         open={library}
         onClose={() => setLibrary(false)}
@@ -39,6 +42,7 @@ function Shell() {
       <Routes>
         <Route path="/" element={<Dashboard setProject={setProject} onSeed={() => setLibrary(true)} />} />
         <Route path="/new" element={<NewBrd project={project} setProject={setProject} run={run} setRun={setRun} />} />
+        <Route path="/intake" element={<Intake />} />
         <Route path="/projects" element={<Projects setProject={setProject} onSeed={() => setLibrary(true)} />} />
         <Route path="/knowledge" element={<Knowledge project={project} />} />
         <Route path="/agents" element={<Agents />} />
@@ -55,7 +59,13 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
-      <ToastProvider><Shell /></ToastProvider>
+      <Routes>
+        {/* The approver's landing page from the email — deliberately OUTSIDE the app chrome.
+            An external approver clicking a link should see one clean decision screen, not the
+            full console with a nav they have no login for. */}
+        <Route path="/approve" element={<Approve />} />
+        <Route path="/*" element={<ToastProvider><Shell /></ToastProvider>} />
+      </Routes>
     </BrowserRouter>
   )
 }

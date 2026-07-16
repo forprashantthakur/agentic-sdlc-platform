@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Blocks, Bot, ChevronsLeft, FilePlus2, FileStack, FolderKanban, LayoutDashboard,
-  Gauge, Library, Moon, PanelRightClose, PanelRightOpen, Search, Settings, ShieldCheck, Sparkles, Sun,
+  Gauge, Library, Mail, Moon, PanelRightClose, PanelRightOpen, Search, Settings, ShieldCheck, Sparkles, Sun,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
@@ -13,6 +13,7 @@ import BrandLogo from './BrandLogo'
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/new', label: 'New BRD', icon: FilePlus2, accent: true },
+  { to: '/intake', label: 'Email Intake', icon: Mail, badgeKey: 'intake' },
   { to: '/projects', label: 'My Projects', icon: FolderKanban },
   { to: '/knowledge', label: 'Knowledge Sources', icon: Library },
   { to: '/agents', label: 'AI Agents', icon: Bot },
@@ -71,7 +72,7 @@ function PoweredBy({ ints }) {
   )
 }
 
-export default function AppShell({ children, pending = 0, project, health }) {
+export default function AppShell({ children, pending = 0, intakeCount = 0, project, health }) {
   const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark')
   const [collapsed, setCollapsed] = useState(false)
   const [copilot, setCopilot] = useState(true)
@@ -108,6 +109,7 @@ export default function AppShell({ children, pending = 0, project, health }) {
                     <Icon className={cn('h-[18px] w-[18px] shrink-0', item.accent && !isActive && 'text-brand')} />
                     {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
                     {!collapsed && item.badgeKey === 'pending' && pending > 0 && <Badge tone="warning">{pending}</Badge>}
+                    {!collapsed && item.badgeKey === 'intake' && intakeCount > 0 && <Badge tone="brand">{intakeCount}</Badge>}
                   </>
                 )}
               </NavLink>

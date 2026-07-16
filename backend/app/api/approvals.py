@@ -4,13 +4,15 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import get_session
 from app.models import Approval, ApprovalComment, ApprovalStatus, Run, RunStatus
-from app.schemas import ApprovalOut, DecisionIn
+from pydantic import BaseModel, Field
+from app.schemas import ApprovalOut, CommentIn, DecisionIn
+from app.adapters.gmail import parse_decision
 from app.services import runner
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
@@ -110,3 +112,39 @@ def decide_by_token(token: str, body: DecisionIn, db: Session = Depends(get_sess
     if not a:
         raise HTTPException(404, "Approval not found for this token")
     return decide(a.id, body, db)
+
+
+class ReplyIn(BaseModel):
+    from_addr: str = Field(..., alias="from")
+    body: str
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/reply")
+def approval_reply(payload: ReplyIn, db: Session = Depends(get_session)):
+    """Inbound webhook for an approver's EMAIL REPLY.
+
+    The other half of "decide from your inbox": some approvers click a button, some just reply
+    "APPROVED, looks good". A mail provider POSTs the reply here; we parse the verdict and record it
+    against that approver's oldest pending gate. parse_decision already exists and is reused verbatim
+    — the reply path and the button path converge on the same decide() so there is one source of
+    truth for what a decision does.
+    """
+    verdict = parse_decision(payload.body)
+    if verdict is None:
+        raise HTTPException(422, "Could not read a decision (APPROVED / REJECTED / CHANGES REQUESTED) "
+                                 "from the reply.")
+    email = payload.from_addr.strip().lower()
+    a = db.scalar(
+        select(Approval).where(
+            func.lower(Approval.approver_email) == email,
+            Approval.status == ApprovalStatus.PENDING,
+        ).order_by(Approval.created_at.asc())
+    )
+    if not a:
+        raise HTTPException(404, f"No pending approval found for {payload.from_addr}.")
+
+    # The reply body becomes the approver's comment — their words, on the record.
+    comments = [CommentIn(author=payload.from_addr, body=payload.body.strip()[:2000])] \
+        if verdict != "APPROVED" else []
+    return decide(a.id, DecisionIn(decision=ApprovalStatus(verdict), comments=comments), db)

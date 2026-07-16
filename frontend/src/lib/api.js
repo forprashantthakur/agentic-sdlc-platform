@@ -60,6 +60,11 @@ export const api = {
 
   approvals: (pid) => req(`/api/approvals${pid ? `?project_id=${pid}` : ''}`),
   decide: (id, b) => req(`/api/approvals/${id}/decide`, { method: 'POST', body: JSON.stringify(b) }),
+  decideByToken: (token, b) => req(`/api/approvals/by-token/${token}/decide`, { method: 'POST', body: JSON.stringify(b) }),
+  intakeSend: (b) => req('/api/intake/email', { method: 'POST', body: JSON.stringify(b) }),
+  intakeQueue: () => req('/api/intake'),
+  intakeAccept: (id, b) => req(`/api/intake/${id}/accept`, { method: 'POST', body: JSON.stringify(b) }),
+  intakeDiscard: (id) => req(`/api/intake/${id}/discard`, { method: 'POST' }),
 
   memorySearch: (pid, q, k = 8) =>
     req(`/api/memory/search?project_id=${pid}&q=${encodeURIComponent(q)}&k=${k}`),

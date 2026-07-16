@@ -50,7 +50,13 @@ def _out(db: Session, p: Project) -> ProjectOut:
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_session)):
-    return [_out(db, p) for p in db.scalars(select(Project).order_by(Project.created_at.desc()))]
+    # A DRAFT sits in the intake queue, not the project list — showing it here would let a run be
+    # started around the review step the intake queue exists to enforce.
+    return [
+        _out(db, p)
+        for p in db.scalars(select(Project).order_by(Project.created_at.desc()))
+        if (p.context or {}).get("intake", {}).get("status") != "DRAFT"
+    ]
 
 
 @router.post("", response_model=ProjectOut, status_code=201)
