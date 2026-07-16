@@ -47,21 +47,20 @@ export default function Intake() {
 
   const send = async () => {
     if (!form.from.trim() || !form.body.trim()) {
-      toast({ title: 'A From address and a body are required', tone: 'warning' })
+      toast('A From address and a body are required', { tone: 'warning' })
       return
     }
     setSending(true)
     try {
       const d = await api.intakeSend(form)
-      toast({
-        title: 'Email received into the pipeline',
-        detail: `Detected ${d.preview?.candidate_count ?? 0} candidate requirements. It is now in the intake queue for review.`,
+      toast('Email received into the pipeline', {
+        detail: `Detected ${d.preview?.candidate_count ?? 0} candidate requirements — now in the intake queue for review.`,
         tone: 'success',
       })
       setForm({ from: '', subject: '', body: '' })
       load()
     } catch (e) {
-      toast({ title: 'Could not accept the email', detail: e.message, tone: 'danger' })
+      toast('Could not accept the email', { detail: e.message, tone: 'error' })
     } finally {
       setSending(false)
     }
@@ -72,12 +71,12 @@ export default function Intake() {
     try {
       const list = approvers.split(',').map((s) => s.trim()).filter(Boolean)
       const r = await api.intakeAccept(d.id, { approvers: list, base_url: window.location.origin })
-      toast({ title: `Pipeline started for "${d.name}"`, detail: 'The Requirement Gathering agent is extracting now.', tone: 'success' })
+      toast(`Pipeline started for "${d.name}"`, { detail: 'The Requirement Gathering agent is extracting now.', tone: 'success' })
       load()
       nav('/review')
       return r
     } catch (e) {
-      toast({ title: 'Could not start the pipeline', detail: e.message, tone: 'danger' })
+      toast('Could not start the pipeline', { detail: e.message, tone: 'error' })
     } finally {
       setBusy('')
     }
@@ -89,7 +88,7 @@ export default function Intake() {
       await api.intakeDiscard(d.id)
       load()
     } catch (e) {
-      toast({ title: 'Could not discard', detail: e.message, tone: 'danger' })
+      toast('Could not discard', { detail: e.message, tone: 'error' })
     } finally {
       setBusy('')
     }
