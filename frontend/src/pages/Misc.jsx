@@ -167,12 +167,17 @@ export function Knowledge({ project }) {
 }
 
 const AGENT_DETAIL = {
-  agent1_requirements: { input: 'Meeting notes · emails · transcripts · uploads', output: 'Structured requirements + conflicts + gaps', model: 'Gemini 2.5 Pro · temp 0.1' },
-  agent2_concept_note: { input: 'Business requirements', output: 'Objectives · scope · rules · risks', model: 'Gemini 2.5 Pro · temp 0.25' },
-  agent3_wireframe: { input: 'Concept note', output: 'Screen spec → Stitch screens (HTML + PNG)', model: 'Gemini 2.5 Pro · temp 0.35' },
-  agent4_requirement_docs: { input: 'Concept note + wireframes', output: 'BRD · FRD · SRS · Stories · ACs · APIs · NFRs', model: 'Gemini 2.5 Pro · temp 0.2–0.3' },
-  agent5_approval: { input: 'Any artifact version', output: 'Approval emails · comments · version sealing', model: 'Deterministic — no LLM' },
-  agent6_sprint: { input: 'Approved user stories', output: 'Epics · sprints · points → Jira', model: 'Gemini 2.5 Pro · temp 0.25' },
+  agent1_requirements: { flow: 1, input: 'Meeting notes · emails · transcripts · uploads', output: 'Structured requirements + conflicts + gaps', model: 'Gemini 2.5 Pro · temp 0.1' },
+  agent2_concept_note: { flow: 1, input: 'Business requirements', output: 'Objectives · scope · rules · risks', model: 'Gemini 2.5 Pro · temp 0.25' },
+  agent3_wireframe: { flow: 1, input: 'Concept note', output: 'Screen spec → Stitch screens (HTML + PNG)', model: 'Gemini 2.5 Pro · temp 0.35' },
+  agent4_requirement_docs: { flow: 1, input: 'Concept note + wireframes', output: 'BRD · FRD · SRS · Stories · ACs · APIs · NFRs', model: 'Gemini 2.5 Pro · temp 0.2–0.3' },
+  agent5_approval: { flow: 1, input: 'Any artifact version', output: 'Approval emails · comments · version sealing', model: 'Deterministic — no LLM' },
+  agent6_sprint: { flow: 1, input: 'Approved user stories', output: 'Epics · sprints · points → Jira', model: 'Gemini 2.5 Pro · temp 0.25' },
+  agent7_backlog: { input: 'Approved requirement pack', output: 'Refined stories · AC · estimates → Jira + Confluence', model: 'Gemini · temp 0.2', flow: 2 },
+  agent8_grooming: { input: 'Refined backlog + capacity', output: 'Sprint composition · grooming pack', model: 'Gemini · temp 0.25', flow: 2 },
+  agent9_dev: { input: 'Sprint stories', output: 'Story context · code-review checklist', model: 'Gemini · temp 0.2', flow: 2 },
+  agent10_qe: { input: 'Acceptance criteria', output: 'Test cases → Jira · bug rework loop', model: 'Gemini · temp 0.2', flow: 2 },
+  agent11_release: { input: 'Passed QE + review', output: 'Evidence pack · story → Done · DevOps hand-off', model: 'Gemini · temp 0.2', flow: 2 },
 }
 
 export function Agents() {
@@ -184,8 +189,9 @@ export function Agents() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">AI Agents</h1>
         <p className="text-[13px] text-muted mt-1">
-          Six specialised agents in a stateful graph. Agent 5 deliberately has no LLM — an approval
-          gate that could be talked into approving itself would not be a gate.
+          Eleven specialised agents across two flows — requirement documentation (1–6) and sprint
+          delivery (7–11). Agent 5 deliberately has no LLM: an approval gate that could be talked
+          into approving itself would not be a gate.
         </p>
       </div>
 

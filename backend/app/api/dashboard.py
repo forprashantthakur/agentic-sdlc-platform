@@ -21,6 +21,12 @@ AGENTS = [
     ("agent4_requirement_docs", "Requirement Documents", "BRD · FRD · SRS · Stories · APIs · NFRs"),
     ("agent5_approval", "Approval", "Approval emails, comments, versioning, gates"),
     ("agent6_sprint", "Sprint", "Epics, stories, points → Jira"),
+    # ── Process Flow 2 — sprint planning, development, testing ──
+    ("agent7_backlog", "Backlog & Story Refinement", "Refine stories, AC & estimates → Jira + Confluence"),
+    ("agent8_grooming", "Sprint Planning & Grooming", "Sprint composition against capacity"),
+    ("agent9_dev", "Development Assist", "Story context + code-review checklist from AC"),
+    ("agent10_qe", "Test Generation & QE", "Test cases from AC · bug rework loop"),
+    ("agent11_release", "Release Readiness & DevOps Hand-off", "Evidence pack · story → Done · DevOps"),
 ]
 
 
