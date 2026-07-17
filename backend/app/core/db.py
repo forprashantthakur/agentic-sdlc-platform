@@ -27,6 +27,15 @@ _RECONCILE = [
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS context JSONB NOT NULL DEFAULT '{}'::jsonb",
 ]
 
+# Native Postgres ENUMs are not altered by create_all(). Flow 2 added five ArtifactType values, and
+# an existing live database's `artifacttype` enum does not have them — so an INSERT of a Flow-2
+# artifact would fail with "invalid input value for enum". ADD VALUE IF NOT EXISTS is idempotent and
+# safe to run every boot. It must run in AUTOCOMMIT (not a transaction), which is why it is handled
+# separately below.
+_ENUM_VALUES = [
+    "REFINED_BACKLOG", "GROOMING_PACK", "CODE_REVIEW", "TEST_CASES", "RELEASE_HANDOFF",
+]
+
 
 def init_db() -> None:
     if IS_POSTGRES:
@@ -40,6 +49,13 @@ def init_db() -> None:
                     conn.execute(text(stmt))
             except Exception as e:  # table may not exist yet on a first boot
                 log.warning("db.reconcile_skipped", stmt=stmt, error=str(e))
+        # Enum values: ADD VALUE cannot run inside a transaction, so use an autocommit connection.
+        for val in _ENUM_VALUES:
+            try:
+                with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                    conn.execute(text(f"ALTER TYPE artifacttype ADD VALUE IF NOT EXISTS '{val}'"))
+            except Exception as e:
+                log.warning("db.enum_reconcile_skipped", value=val, error=str(e))
 
 
 def get_session() -> Iterator[Session]:
