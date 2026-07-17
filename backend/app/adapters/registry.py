@@ -11,6 +11,7 @@ from functools import lru_cache
 
 from app.adapters.figma_mcp import FigmaMCPAdapter, MockFigmaAdapter
 from app.adapters.stitch import MockStitchAdapter, StitchAdapter
+from app.adapters.confluence import ConfluenceAdapter, MockConfluenceAdapter
 from app.adapters.gdrive import DriveAdapter, MockDriveAdapter
 from app.adapters.gmail import GmailAdapter, MockGmailAdapter, SmtpMailAdapter
 from app.adapters.jira import JiraAdapter, MockJiraAdapter
@@ -91,3 +92,11 @@ def describe() -> dict[str, str]:
     }
     log.info("adapters.describe", **d)
     return d
+
+
+def docs_repo():
+    """Confluence — the document system of record for Flow 2."""
+    if settings.is_mocked("confluence") or not settings.confluence_token:
+        return MockConfluenceAdapter()
+    return ConfluenceAdapter(settings.confluence_base_url, settings.confluence_email,
+                             settings.confluence_token, settings.confluence_space)

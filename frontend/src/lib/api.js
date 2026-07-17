@@ -49,6 +49,7 @@ export const api = {
   },
 
   startRun: (b) => req('/api/runs', { method: 'POST', body: JSON.stringify(b) }),
+  startFlow2: (b) => req('/api/runs/flow2', { method: 'POST', body: JSON.stringify(b) }),
   runs: (pid) => req(`/api/runs${pid ? `?project_id=${pid}` : ''}`),
   events: (id, after = 0) => req(`/api/runs/${id}/events?after=${after}`),
 

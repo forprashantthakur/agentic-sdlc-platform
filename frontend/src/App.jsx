@@ -9,6 +9,7 @@ import Performance from './pages/Performance'
 import Approve from './pages/Approve'
 import Intake from './pages/Intake'
 import Outbox from './pages/Outbox'
+import SprintDelivery from './pages/SprintDelivery'
 import NewBrd from './pages/NewBrd'
 import { Agents, Documents, Integrations, Knowledge, Projects, ReviewCenter, Settings } from './pages/Misc'
 
@@ -47,6 +48,7 @@ function Shell() {
         <Route path="/new" element={<NewBrd project={project} setProject={setProject} run={run} setRun={setRun} />} />
         <Route path="/intake" element={<Intake setProject={setProject} setRun={setRun} />} />
         <Route path="/outbox" element={<Outbox />} />
+        <Route path="/sprint-delivery" element={<SprintDelivery />} />
         <Route path="/projects" element={<Projects setProject={setProject} onSeed={() => setLibrary(true)} />} />
         <Route path="/knowledge" element={<Knowledge project={project} />} />
         <Route path="/agents" element={<Agents />} />

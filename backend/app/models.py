@@ -49,6 +49,12 @@ class ArtifactType(str, enum.Enum):
     NFR = "NFR"
     ACCEPTANCE_CRITERIA = "ACCEPTANCE_CRITERIA"
     SPRINT_PLAN = "SPRINT_PLAN"                       # Agent 6
+    # ── Process Flow 2 — sprint planning, development, testing ──
+    REFINED_BACKLOG = "REFINED_BACKLOG"               # Agent 7
+    GROOMING_PACK = "GROOMING_PACK"                   # Agent 8
+    CODE_REVIEW = "CODE_REVIEW"                       # Agent 9
+    TEST_CASES = "TEST_CASES"                         # Agent 10
+    RELEASE_HANDOFF = "RELEASE_HANDOFF"               # Agent 11
 
 
 class RunStatus(str, enum.Enum):

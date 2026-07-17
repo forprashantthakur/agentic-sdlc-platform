@@ -143,3 +143,32 @@ SPRINT_PLAN = _req(
     },
     ["epics", "sprints"],
 )
+
+
+# ══════════════════════════ Process Flow 2 schemas ═════════════════════════════
+_OBJ = {"type": "object"}
+_OBJS = {"type": "array", "items": _OBJ}
+
+REFINED_BACKLOG = _req(
+    {"project": _STR, "refined_stories": _OBJS, "open_questions": _OBJS,
+     "total_points": {"type": "integer"}, "notes": _STR},
+    ["refined_stories"])
+
+GROOMING_PACK = _req(
+    {"project": _STR, "sprints": _OBJS, "capacity_per_sprint": {"type": "integer"},
+     "dependencies": _OBJS, "grooming_notes": _STR},
+    ["sprints"])
+
+CODE_REVIEW = _req(
+    {"project": _STR, "reviews": _OBJS, "summary": _STR},
+    ["reviews"])
+
+TEST_CASES = _req(
+    {"project": _STR, "qe_round": {"type": "integer"}, "test_cases": _OBJS, "bugs": _OBJS,
+     "bugs_identified": {"type": "boolean"}, "coverage": _STR, "summary": _STR},
+    ["test_cases", "bugs_identified"])
+
+RELEASE_HANDOFF = _req(
+    {"project": _STR, "completed_stories": _OBJS, "evidence": _OBJ,
+     "release_notes": _STR, "devops_handoff": _OBJ},
+    ["completed_stories", "release_notes"])

@@ -1004,3 +1004,169 @@ def _from_schema(schema: dict, task: str, prompt: str) -> Any:
     if enum := schema.get("enum"):
         return enum[_h(prompt, len(enum))]
     return f"[mock:{task}] no evidence available to derive this field"
+
+
+# ══════════════════════════ Process Flow 2 — mock generators ═══════════════════
+def _stories_from(prompt: str) -> list[dict[str, Any]]:
+    """Recover the Flow-1 user stories the Flow-2 agents build on."""
+    us = _parse_json_from_prompt(prompt, "stories").get("stories", [])
+    if us:
+        return us
+    # fall back to any story-like titles in the prompt
+    return [{"id": f"US-{i+1:02d}", "title": t[:80]}
+            for i, t in enumerate(re.findall(r"(?:story|US-\d+)[:\-\s]+(.+)", prompt, re.I)[:6])] or \
+           [{"id": "US-01", "title": "Deliver the approved capability"}]
+
+
+def _points(title: str) -> int:
+    return [2, 3, 5, 8, 13][_h(title, 5)]
+
+
+def _backlog_refinement(prompt: str) -> dict[str, Any]:
+    project = _project(prompt)
+    stories = _stories_from(prompt)
+    refined = []
+    for s in stories:
+        title = s.get("title", "")
+        refined.append({
+            "id": s.get("id"),
+            "title": title,
+            "estimate_points": _points(title),
+            "acceptance_criteria": s.get("acceptance_criteria")
+                or [f"Given the {project} context, {title.lower()} behaves as specified",
+                    "All mandatory validations and error states are handled",
+                    "The action is auditable and traceable to its requirement"],
+            "source_requirement": s.get("source_evidence", ["Approved requirement pack"])[0]
+                if isinstance(s.get("source_evidence"), list) else "Approved requirement pack",
+        })
+    return {
+        "project": project,
+        "refined_stories": refined,
+        "open_questions": [
+            {"id": "Q-01", "question": "Confirm the story-point baseline with the delivery team",
+             "raised_by": "Development", "status": "OPEN"},
+        ],
+        "total_points": sum(r["estimate_points"] for r in refined),
+        "notes": "Stories refined from the approved Flow-1 pack; estimates deterministic in mock mode.",
+    }
+
+
+def _grooming(prompt: str) -> dict[str, Any]:
+    project = _project(prompt)
+    stories = _stories_from(prompt)
+    cap = 15
+    sprints, cur, load, n = [], [], 0, 1
+    for s in stories:
+        pts = _points(s.get("title", ""))
+        if load + pts > cap and cur:
+            sprints.append({"number": n, "story_ids": cur, "points": load,
+                            "goal": f"Deliver sprint {n} scope for {project}"})
+            cur, load, n = [], 0, n + 1
+        cur.append(s.get("id"))
+        load += pts
+    if cur:
+        sprints.append({"number": n, "story_ids": cur, "points": load,
+                        "goal": f"Deliver sprint {n} scope for {project}"})
+    return {
+        "project": project,
+        "sprints": sprints,
+        "capacity_per_sprint": cap,
+        "dependencies": [{"from": stories[0].get("id"), "to": stories[-1].get("id"),
+                          "note": "Sequence dependency identified in grooming"}] if len(stories) > 1 else [],
+        "grooming_notes": "Sprint composition proposed against a 15-point capacity; confirmed in the "
+                          "grooming workshop and written back to Jira.",
+    }
+
+
+def _code_review(prompt: str) -> dict[str, Any]:
+    project = _project(prompt)
+    stories = _stories_from(prompt)
+    reviews = []
+    for s in stories:
+        reviews.append({
+            "story_id": s.get("id"),
+            "checklist": [
+                {"item": "Implements every acceptance criterion", "status": "PASS"},
+                {"item": "Input validation and error handling present", "status": "PASS"},
+                {"item": "No secrets or PII in code or logs", "status": "PASS"},
+                {"item": "Unit tests accompany the change", "status": "PASS"},
+                {"item": "Meets the bank coding standard", "status": "PASS"},
+            ],
+        })
+    return {
+        "project": project,
+        "reviews": reviews,
+        "summary": f"Code-review checklist generated for {len(reviews)} stories from their acceptance "
+                   "criteria and the bank coding standard; awaiting Technical-Lead approval.",
+    }
+
+
+def _qe_round(prompt: str) -> int:
+    m = re.search(r"QE ROUND:\s*(\d+)", prompt)
+    return int(m.group(1)) if m else 1
+
+
+def _test_generation(prompt: str) -> dict[str, Any]:
+    project = _project(prompt)
+    stories = _stories_from(prompt)
+    rnd = _qe_round(prompt)
+    cases = []
+    for s in stories:
+        for j, ac in enumerate((s.get("acceptance_criteria") or
+                                [f"{s.get('title','')} behaves as specified"])[:3]):
+            cases.append({
+                "test_id": f"{s.get('id')}-T{j+1}",
+                "story_id": s.get("id"),
+                "acceptance_criterion": ac if isinstance(ac, str) else str(ac),
+                "steps": "Given the precondition, when the action is performed, then the AC holds.",
+                "expected": "Outcome matches the acceptance criterion.",
+                "result": "PASS",
+            })
+    # Deterministic rework loop: bugs on the FIRST QE pass, clean on the second — exactly the
+    # "bugs identified? -> back to development" cycle in the diagram, bounded to one loop.
+    bugs = []
+    if rnd < 2 and cases:
+        c = cases[0]
+        c["result"] = "FAIL"
+        bugs = [{"id": "BUG-01", "story_id": c["story_id"], "severity": "Medium",
+                 "title": f"{c['story_id']}: acceptance criterion not met on first build",
+                 "detail": f"Test {c['test_id']} failed — {c['acceptance_criterion'][:80]}"}]
+    return {
+        "project": project,
+        "qe_round": rnd,
+        "test_cases": cases,
+        "bugs": bugs,
+        "bugs_identified": bool(bugs),
+        "coverage": f"{len(cases)} test cases across {len(stories)} stories, one per acceptance criterion.",
+        "summary": ("Bugs identified — routing back to development." if bugs
+                    else "All acceptance criteria pass — ready to present to PO & BTG."),
+    }
+
+
+def _release_handoff(prompt: str) -> dict[str, Any]:
+    project = _project(prompt)
+    stories = _stories_from(prompt)
+    return {
+        "project": project,
+        "completed_stories": [{"id": s.get("id"), "title": s.get("title", ""), "status": "Done"}
+                              for s in stories],
+        "evidence": {
+            "tests_passed": True,
+            "code_review_approved": True,
+            "acceptance_criteria_covered": "100%",
+            "sign_off": "PO & BTG",
+        },
+        "release_notes": f"All stories for {project} pass QE with acceptance-criteria coverage, "
+                         "code review approved, and PO/BTG sign-off recorded. Handed to DevOps for "
+                         "production deployment.",
+        "devops_handoff": {"status": "NOTIFIED", "channel": "devops"},
+    }
+
+
+_DERIVERS.update({
+    "backlog_refinement": _backlog_refinement,
+    "grooming": _grooming,
+    "code_review": _code_review,
+    "test_generation": _test_generation,
+    "release_handoff": _release_handoff,
+})

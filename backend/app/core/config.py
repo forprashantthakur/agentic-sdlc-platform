@@ -138,6 +138,11 @@ class Settings(BaseSettings):
     gdrive_root_folder_id: str = ""
 
     jira_base_url: str = ""
+    confluence_mock: bool | None = None
+    confluence_base_url: str = "https://hdfcbank.atlassian.net/wiki"
+    confluence_email: str = ""
+    confluence_token: str = ""
+    confluence_space: str = "SDLC"
     jira_email: str = ""
     jira_token: str = ""
     jira_project_key: str = "HDFC"

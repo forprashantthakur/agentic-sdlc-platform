@@ -66,7 +66,8 @@ def _ctx(db, state: SDLCState, gate: str | None = None) -> AgentContext:
         project_id=state["project_id"],
         project_name=state["project_name"],
         run_id=state["run_id"],
-        state={"payloads": state.get("payloads", {}), "artifacts": state.get("artifacts", {})},
+        state={"payloads": state.get("payloads", {}), "artifacts": state.get("artifacts", {}),
+               "revision": state.get("revision", {})},
         feedback=fb,
     )
 
@@ -303,9 +304,19 @@ def _apply_decision(state: SDLCState, gate: str, decision: dict[str, Any]) -> di
     }
 
 
+# Flow-2 gate -> the artifact version it approves.
+_FLOW2_GATE_ARTIFACTS = {
+    "btg_gate": [ArtifactType.REFINED_BACKLOG],
+    "review_gate": [ArtifactType.CODE_REVIEW],
+    "completion_gate": [ArtifactType.TEST_CASES],
+}
+
+
 def _gate_artifacts(gate: str) -> list[ArtifactType]:
     if gate == CONCEPT_GATE:
         return [ArtifactType.CONCEPT_NOTE, ArtifactType.BUSINESS_REQUIREMENTS]
+    if gate in _FLOW2_GATE_ARTIFACTS:
+        return _FLOW2_GATE_ARTIFACTS[gate]
     return [
         ArtifactType.BRD, ArtifactType.FRD, ArtifactType.SRS, ArtifactType.WIREFRAME,
         ArtifactType.USER_STORIES, ArtifactType.ACCEPTANCE_CRITERIA,

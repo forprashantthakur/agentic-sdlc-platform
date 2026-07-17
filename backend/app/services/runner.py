@@ -19,6 +19,13 @@ from langgraph.types import Command
 from app.core.db import SessionLocal
 from app.core.logging import log
 from app.graph.builder import build_graph
+from app.graph.flow2_builder import build_flow2_graph
+
+
+def _graph_for(thread_id: str, cp):
+    # Flow-2 runs use a distinct thread-id prefix so resume rebuilds the SAME graph without a
+    # schema change. Everything else is Flow 1.
+    return build_flow2_graph(cp) if thread_id.startswith('f2-') else build_graph(cp)
 from app.memory import shared
 from app.memory.short_term import checkpointer
 from app.models import Project, Run, RunStatus
@@ -35,7 +42,7 @@ def _execute(thread_id: str, payload: Any) -> None:
     """Drive the graph until it either finishes or hits an interrupt."""
     try:
         with checkpointer() as cp:
-            graph = build_graph(cp)
+            graph = _graph_for(thread_id, cp)
             # One retrieval scope for the WHOLE run, opened here rather than inside a node.
             # LangGraph copies the context into each parallel worker thread, so a scope opened in a
             # node is private to that node — the memo would never be hit by the branch beside it.
@@ -119,6 +126,62 @@ def start_run(
         db.close()
 
 
+def start_flow2(*, project_id: str, approvers: list[str],
+                base_url: str = "http://localhost:5173") -> Run:
+    """Start Process Flow 2 (sprint delivery) on a project whose Flow-1 pack is approved.
+
+    Seeds the graph state with the approved user stories and acceptance criteria — the delivery
+    agents refine and build on those, they do not re-derive them, so traceability to the approved
+    requirements holds.
+    """
+    from app.models import Artifact, ArtifactType, ArtifactVersion
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        project = db.get(Project, project_id)
+        if project is None:
+            raise ValueError("Unknown project")
+
+        payloads: dict = {}
+        for atype in (ArtifactType.USER_STORIES, ArtifactType.ACCEPTANCE_CRITERIA,
+                      ArtifactType.NFR, ArtifactType.CONCEPT_NOTE):
+            art = db.scalar(select(Artifact).where(
+                Artifact.project_id == project_id, Artifact.type == atype))
+            if not art:
+                continue
+            v = db.scalar(select(ArtifactVersion).where(
+                ArtifactVersion.artifact_id == art.id
+            ).order_by(ArtifactVersion.version.desc()))
+            if v:
+                payloads[atype.value] = v.payload
+        if ArtifactType.USER_STORIES.value not in payloads:
+            raise ValueError("This project has no approved user stories — run Flow 1 to completion first.")
+
+        run = Run(project_id=project_id, thread_id="", status=RunStatus.PENDING)
+        db.add(run)
+        db.flush()
+        run.thread_id = f"f2-run-{run.id}"          # the prefix that selects the Flow-2 graph
+        db.commit()
+
+        payload = {
+            "project_id": project_id, "project_name": project.name, "run_id": run.id,
+            "approvers": approvers, "base_url": base_url,
+            "payloads": payloads, "artifacts": {}, "external": {},
+            "gate_decisions": {}, "feedback": {}, "revision": {}, "trace": [], "status": "RUNNING",
+        }
+        thread_id, run_id = run.thread_id, run.id
+    finally:
+        db.close()
+
+    _spawn(thread_id, payload)
+    db = SessionLocal()
+    try:
+        return db.get(Run, run_id)
+    finally:
+        db.close()
+
+
 def resume_run(*, run: Run, decision: str, comments: list[str]) -> None:
     """Feed a human decision back into the suspended graph."""
     _spawn(run.thread_id, Command(resume={"decision": decision, "comments": comments}))
@@ -126,7 +189,7 @@ def resume_run(*, run: Run, decision: str, comments: list[str]) -> None:
 
 def get_state(thread_id: str) -> dict[str, Any]:
     with checkpointer() as cp:
-        graph = build_graph(cp)
+        graph = _graph_for(thread_id, cp)
         snap = graph.get_state(_config(thread_id))
     return {
         "values": snap.values,
@@ -140,7 +203,7 @@ def get_state(thread_id: str) -> dict[str, Any]:
 def history(thread_id: str, limit: int = 25) -> list[dict[str, Any]]:
     """Checkpoint history — this is the time-machine that makes a run replayable for audit."""
     with checkpointer() as cp:
-        graph = build_graph(cp)
+        graph = _graph_for(thread_id, cp)
         out = []
         for snap in graph.get_state_history(_config(thread_id)):
             out.append({

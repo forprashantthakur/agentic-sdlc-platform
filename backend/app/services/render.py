@@ -159,6 +159,74 @@ def render_sprint_plan(p: dict[str, Any]) -> str:
     return "\n".join(s)
 
 
+
+
+# ── Process Flow 2 renderers ───────────────────────────────────────────────────
+def render_refined_backlog(p: dict[str, Any]) -> str:
+    out = [f"# Refined Backlog — {p.get('project','')}", "",
+           f"_{p.get('notes','')}_", "", "## Stories", ""]
+    out.append(_tbl(["ID", "Story", "Points", "Acceptance criteria"],
+        [[s.get("id",""), s.get("title",""), str(s.get("estimate_points","")),
+          "; ".join(str(a) for a in s.get("acceptance_criteria", []))] for s in p.get("refined_stories", [])]))
+    if p.get("open_questions"):
+        out += ["", "## Open questions", ""]
+        out.append(_tbl(["ID", "Question", "Raised by", "Status"],
+            [[q.get("id",""), q.get("question",""), q.get("raised_by",""), q.get("status","")]
+             for q in p["open_questions"]]))
+    out += ["", f"**Total points:** {p.get('total_points','')}"]
+    return "\n".join(out)
+
+
+def render_grooming(p: dict[str, Any]) -> str:
+    out = [f"# Grooming Pack — {p.get('project','')}", "", f"_{p.get('grooming_notes','')}_", "",
+           f"Capacity per sprint: {p.get('capacity_per_sprint','')} points", "", "## Sprints", ""]
+    out.append(_tbl(["Sprint", "Goal", "Stories", "Points"],
+        [[str(sp.get("number","")), sp.get("goal",""), ", ".join(sp.get("story_ids", [])),
+          str(sp.get("points",""))] for sp in p.get("sprints", [])]))
+    return "\n".join(out)
+
+
+def render_code_review(p: dict[str, Any]) -> str:
+    out = [f"# Code-Review Checklist — {p.get('project','')}", "", f"_{p.get('summary','')}_", ""]
+    for r in p.get("reviews", []):
+        out += [f"## {r.get('story_id','')}", ""]
+        out.append(_tbl(["Checklist item", "Status"],
+            [[c.get("item",""), c.get("status","")] for c in r.get("checklist", [])]))
+        out.append("")
+    return "\n".join(out)
+
+
+def render_test_cases(p: dict[str, Any]) -> str:
+    out = [f"# Test Cases — {p.get('project','')} (QE round {p.get('qe_round','')})", "",
+           f"_{p.get('summary','')}_", "", f"Coverage: {p.get('coverage','')}", "", "## Test cases", ""]
+    out.append(_tbl(["Test", "Story", "Acceptance criterion", "Result"],
+        [[t.get("test_id",""), t.get("story_id",""), str(t.get("acceptance_criterion","")),
+          t.get("result","")] for t in p.get("test_cases", [])]))
+    if p.get("bugs"):
+        out += ["", "## Bugs raised", ""]
+        out.append(_tbl(["ID", "Story", "Severity", "Detail"],
+            [[b.get("id",""), b.get("story_id",""), b.get("severity",""), b.get("detail","")]
+             for b in p["bugs"]]))
+    return "\n".join(out)
+
+
+def render_release_handoff(p: dict[str, Any]) -> str:
+    ev = p.get("evidence", {})
+    out = [f"# Release Hand-off — {p.get('project','')}", "", f"_{p.get('release_notes','')}_", "",
+           "## Completed stories", ""]
+    out.append(_tbl(["ID", "Story", "Status"],
+        [[s.get("id",""), s.get("title",""), s.get("status","")] for s in p.get("completed_stories", [])]))
+    out += ["", "## Evidence", "",
+            _tbl(["Check", "Result"], [[k.replace("_"," ").title(), str(v)] for k, v in ev.items()]),
+            "", f"**DevOps hand-off:** {p.get('devops_handoff',{}).get('status','')}"]
+    return "\n".join(out)
+
+
+def _generic(p: dict[str, Any]) -> str:
+    import json as _json
+    return "```json\n" + _json.dumps(p, indent=2)[:6000] + "\n```"
+
+
 RENDERERS = {
     ArtifactType.BUSINESS_REQUIREMENTS: render_requirements,
     ArtifactType.CONCEPT_NOTE: render_concept_note,
@@ -171,8 +239,13 @@ RENDERERS = {
     ArtifactType.API_REQUIREMENTS: render_api,
     ArtifactType.NFR: render_nfr,
     ArtifactType.SPRINT_PLAN: render_sprint_plan,
+    ArtifactType.REFINED_BACKLOG: render_refined_backlog,
+    ArtifactType.GROOMING_PACK: render_grooming,
+    ArtifactType.CODE_REVIEW: render_code_review,
+    ArtifactType.TEST_CASES: render_test_cases,
+    ArtifactType.RELEASE_HANDOFF: render_release_handoff,
 }
 
 
 def render(atype: ArtifactType, payload: dict[str, Any]) -> str:
-    return RENDERERS[atype](payload)
+    return RENDERERS.get(atype, _generic)(payload)

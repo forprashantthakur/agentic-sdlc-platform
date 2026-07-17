@@ -10,10 +10,31 @@ from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal, get_session
 from app.models import Run, RunEvent
+from pydantic import BaseModel
 from app.schemas import EventOut, RunIn, RunOut
 from app.services import runner
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+class Flow2In(BaseModel):
+    project_id: str
+    approvers: list[str] = []
+    base_url: str = "http://localhost:5173"
+
+
+@router.post("/flow2", response_model=RunOut, status_code=202)
+def start_flow2(body: Flow2In):
+    """Start Process Flow 2 (sprint planning, development, testing) on a Flow-1-completed project."""
+    try:
+        run = runner.start_flow2(
+            project_id=body.project_id,
+            approvers=[str(a) for a in body.approvers],
+            base_url=body.base_url,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return run
 
 
 @router.post("", response_model=RunOut, status_code=202)
