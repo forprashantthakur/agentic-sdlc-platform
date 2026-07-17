@@ -15,6 +15,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.logging import log
+from app.adapters import outbox
 
 DECISION_RE = re.compile(r"\b(APPROVE[D]?|REJECT(?:ED)?|CHANGES?\s+REQUESTED)\b", re.I)
 
@@ -53,6 +54,8 @@ class GmailAdapter:
         if thread_id:
             body["threadId"] = thread_id
         sent = self.svc.users().messages().send(userId="me", body=body).execute()
+        outbox.record(to=to, subject=subject, html=html, thread_id=thread_id,
+                      message_id=sent.get("id"), delivery="gmail")
         return {"message_id": sent["id"], "thread_id": sent["threadId"]}
 
     def fetch_replies(self, *, thread_id) -> list[dict[str, Any]]:
@@ -81,22 +84,62 @@ def _extract_text(payload: dict) -> str:
 
 
 class MockGmailAdapter:
-    """Captures outbound mail in memory so the UI can render an 'Outbox' tab in the demo."""
-
-    outbox: list[dict[str, Any]] = []
+    """Records outbound mail to the shared outbox (app.adapters.outbox) so the UI can render an
+    Approval Outbox in the demo. Nothing is delivered — the email is captured and shown in-app."""
 
     def send(self, *, to, subject, html, thread_id=None) -> dict[str, Any]:
-        tid = thread_id or uuid.uuid4().hex[:16]
-        rec = {
-            "message_id": uuid.uuid4().hex[:16],
-            "thread_id": tid,
-            "to": to,
-            "subject": subject,
-            "html": html,
-        }
-        MockGmailAdapter.outbox.append(rec)
+        rec = outbox.record(to=to, subject=subject, html=html, thread_id=thread_id, delivery="mock")
         log.info("gmail.mock.send", to=to, subject=subject)
-        return {"message_id": rec["message_id"], "thread_id": tid}
+        return {"message_id": rec["message_id"], "thread_id": rec["thread_id"]}
 
     def fetch_replies(self, *, thread_id) -> list[dict[str, Any]]:
         return []  # in the demo, decisions arrive via the API/UI, not by mail poll
+
+
+class SmtpMailAdapter:
+    """Real email over plain SMTP — the low-friction way to make an approval land in a real inbox.
+
+    Chosen over Gmail domain-wide delegation because a demo needs one env block and an app password,
+    not a Workspace admin granting service-account scopes. A send failure NEVER fails the run: the
+    approval still exists in the app, the email is only a notification, so we record the attempt (with
+    the error) to the Outbox and carry on. Resilience over drama.
+    """
+
+    def __init__(self) -> None:
+        self.host = settings.smtp_host
+        self.port = settings.smtp_port
+        self.user = settings.smtp_user
+        self.password = settings.smtp_password
+        self.sender = settings.smtp_from or settings.smtp_user
+        self.use_tls = settings.smtp_use_tls
+
+    def send(self, *, to, subject, html, thread_id=None) -> dict[str, Any]:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+
+        recipients = to if isinstance(to, list) else [to]
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = self.sender
+        msg["To"] = ", ".join(recipients)
+        msg.attach(MIMEText(html, "html"))
+
+        try:
+            with smtplib.SMTP(self.host, self.port, timeout=20) as srv:
+                if self.use_tls:
+                    srv.starttls()
+                if self.user:
+                    srv.login(self.user, self.password)
+                srv.sendmail(self.sender, recipients, msg.as_string())
+            rec = outbox.record(to=recipients, subject=subject, html=html, thread_id=thread_id,
+                                delivery="smtp")
+            log.info("smtp.send", to=recipients, subject=subject)
+            return {"message_id": rec["message_id"], "thread_id": rec["thread_id"]}
+        except Exception as e:  # never fail the run over a notification
+            rec = outbox.record(to=recipients, subject=subject, html=html, thread_id=thread_id,
+                                delivery="mock", error=f"SMTP send failed: {e}")
+            log.warning("smtp.send_failed", error=str(e), to=recipients)
+            return {"message_id": rec["message_id"], "thread_id": rec["thread_id"]}
+
+    def fetch_replies(self, *, thread_id) -> list[dict[str, Any]]:
+        return []  # inbound replies arrive via the /api/approvals/reply webhook, not SMTP polling

@@ -155,9 +155,9 @@ def test_full_workflow_with_a_revision_loop():
         assert any(i["type"] == "Epic" for i in sp.payload["jira"])
 
         # Approval emails went out — one per round, per approver.
-        from app.adapters.gmail import MockGmailAdapter
+        from app.adapters import outbox
 
-        assert len(MockGmailAdapter.outbox) >= 3, "Expected 3 approval emails (2 concept rounds + 1 docs)"
+        assert len(outbox.all()) >= 3, "Expected 3 approval emails (2 concept rounds + 1 docs)"
 
         run_row = db.get(Run, run.id)
         assert run_row.status == RunStatus.COMPLETED

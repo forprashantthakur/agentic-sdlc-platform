@@ -126,6 +126,15 @@ class Settings(BaseSettings):
 
     google_sa_json: str = ""
     gmail_sender: str = "sdlc-bot@hdfcbank.com"
+    # Real email delivery via plain SMTP — the low-friction path for a live inbox demo. When these
+    # are set, approval emails are actually sent (to whatever address is in the run's approver list);
+    # when they are not, the platform records the email to the Outbox and shows it in-app instead.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
     gdrive_root_folder_id: str = ""
 
     jira_base_url: str = ""

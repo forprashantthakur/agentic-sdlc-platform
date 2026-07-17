@@ -303,3 +303,27 @@ def wireframes_probe(prompt: str = "A simple login screen with email and passwor
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
     return out
+
+
+@router.get("/outbox")
+def approval_outbox():
+    """Every email the platform has triggered this session — for the Approval Outbox view.
+
+    In mock mode the email is captured, not delivered, and shown here exactly as the approver would
+    see it (buttons live). With SMTP/Gmail configured, the same record also reflects a real send.
+    """
+    from app.adapters import outbox
+
+    items = outbox.all()
+    return {
+        "count": len(items),
+        "live_delivery": bool(settings.smtp_host or settings.google_sa_json) and not settings.is_mocked("gmail"),
+        "items": items,
+    }
+
+
+@router.post("/outbox/clear")
+def clear_outbox():
+    from app.adapters import outbox
+
+    return {"cleared": outbox.clear()}

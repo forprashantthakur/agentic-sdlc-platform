@@ -12,7 +12,7 @@ from functools import lru_cache
 from app.adapters.figma_mcp import FigmaMCPAdapter, MockFigmaAdapter
 from app.adapters.stitch import MockStitchAdapter, StitchAdapter
 from app.adapters.gdrive import DriveAdapter, MockDriveAdapter
-from app.adapters.gmail import GmailAdapter, MockGmailAdapter
+from app.adapters.gmail import GmailAdapter, MockGmailAdapter, SmtpMailAdapter
 from app.adapters.jira import JiraAdapter, MockJiraAdapter
 from app.core.config import settings
 from app.core.logging import log
@@ -48,9 +48,14 @@ def wireframer():
 
 @lru_cache
 def mail():
-    if settings.is_mocked("gmail") or not settings.google_sa_json:
-        return MockGmailAdapter()
-    return GmailAdapter(settings.google_sa_json, settings.gmail_sender)
+    # Real send takes precedence when configured: SMTP (simplest) then Gmail service account.
+    # is_mocked("gmail")=True forces the Outbox-only path regardless, for a guaranteed-safe demo.
+    if not settings.is_mocked("gmail"):
+        if settings.smtp_host:
+            return SmtpMailAdapter()
+        if settings.google_sa_json:
+            return GmailAdapter(settings.google_sa_json, settings.gmail_sender)
+    return MockGmailAdapter()
 
 
 @lru_cache

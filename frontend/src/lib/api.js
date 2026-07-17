@@ -19,6 +19,7 @@ export const api = {
   // A generic GET. Its absence is why the Stitch probe and the Performance page both died with
   // "api.get is not a function" — in the browser, before the request was ever sent.
   get: (path) => req(path),
+  post: (path, b) => req(path, { method: 'POST', body: b ? JSON.stringify(b) : undefined }),
 
   health: () => req('/health'),
   metrics: () => req('/api/metrics'),
