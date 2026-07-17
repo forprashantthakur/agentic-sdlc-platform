@@ -3,12 +3,17 @@ import { Check } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 export const STEPS = [
-  { id: 'context', label: 'Business Context', hint: 'Sponsor, objectives, KPIs' },
-  { id: 'ingestion', label: 'Knowledge Ingestion', hint: 'Documents & connectors' },
-  { id: 'discovery', label: 'Requirement Discovery', hint: 'Clarify with the copilot' },
-  { id: 'analysis', label: 'AI Analysis', hint: 'Agents 1–2 → Gate 1' },
-  { id: 'review', label: 'Review & Gates', hint: 'Gate 1 → Agents 3–4 → Gate 2' },
-  { id: 'generate', label: 'Documents', hint: 'BRD, FRD, SRS · export' },
+  // Phase 1 — requirement documentation (Agents 1–6)
+  { id: 'context', label: 'Business Context', hint: 'Sponsor, objectives, KPIs', phase: 1 },
+  { id: 'ingestion', label: 'Knowledge Ingestion', hint: 'Documents & connectors', phase: 1 },
+  { id: 'discovery', label: 'Requirement Discovery', hint: 'Clarify with the copilot', phase: 1 },
+  { id: 'analysis', label: 'AI Analysis', hint: 'Agents 1–2 → Gate 1', phase: 1 },
+  { id: 'review', label: 'Review & Gates', hint: 'Gate 1 → Agents 3–4 → Gate 2', phase: 1 },
+  { id: 'generate', label: 'Documents', hint: 'BRD, FRD, SRS · export', phase: 1 },
+  // Phase 2 — sprint delivery (Agents 7–11)
+  { id: 'deliver_plan', label: 'Backlog & Grooming', hint: 'Agents 7–8 → BTG gate', phase: 2 },
+  { id: 'deliver_build', label: 'Build & Test', hint: 'Agents 9–10 · code review · rework loop', phase: 2 },
+  { id: 'deliver_release', label: 'Release', hint: 'Agent 11 · PO/BTG sign-off → DevOps', phase: 2 },
 ]
 
 export default function Stepper({ current, completed = [], onSelect }) {
@@ -35,13 +40,19 @@ export default function Stepper({ current, completed = [], onSelect }) {
                   {done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : i + 1}
                 </button>
                 {i < STEPS.length - 1 && (
-                  <div className="relative mx-1.5 h-[2px] flex-1 rounded-full bg-line overflow-hidden">
+                  <div className={cn('relative mx-1.5 h-[2px] flex-1 rounded-full overflow-hidden',
+                    STEPS[i + 1]?.phase !== s.phase ? 'bg-transparent border-t-2 border-dashed border-brand/40' : 'bg-line')}>
                     <motion.div className="absolute inset-y-0 left-0 bg-success rounded-full"
                       initial={false} animate={{ width: done ? '100%' : '0%' }} transition={{ duration: 0.4 }} />
                   </div>
                 )}
               </div>
               <div className="mt-2 pr-3">
+                {(i === 0 || STEPS[i - 1]?.phase !== s.phase) && (
+                  <span className="mb-1 inline-block rounded bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand">
+                    Phase {s.phase}
+                  </span>
+                )}
                 <p className={cn('text-[11.5px] font-semibold leading-tight',
                   active ? 'text-brand' : done ? 'text-ink' : 'text-muted')}>{s.label}</p>
                 <p className="text-[10.5px] text-muted leading-tight mt-0.5 hidden lg:block">{s.hint}</p>

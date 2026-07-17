@@ -7,6 +7,7 @@ import Discovery from './steps/Discovery'
 import AiAnalysis from './steps/AiAnalysis'
 import Review from './steps/Review'
 import GenerateBrd from './steps/GenerateBrd'
+import SprintDelivery from './SprintDelivery'
 
 export default function NewBrd({ project, setProject, run, setRun }) {
   // The email-intake flow starts a run and jumps straight to the live agent view. It passes the
@@ -38,6 +39,9 @@ export default function NewBrd({ project, setProject, run, setRun }) {
           onWatchRun={() => setStep('analysis')} />
       )}
       {step === 'generate' && <GenerateBrd project={project} onBack={() => back('generate')} />}
+      {(step === 'deliver_plan' || step === 'deliver_build' || step === 'deliver_release') && (
+        <SprintDelivery project={project} />
+      )}
     </>
   )
 }
