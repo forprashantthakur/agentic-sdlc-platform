@@ -1,5 +1,6 @@
-import { Download, FileCheck2, FileText, GitCompare, Loader2, Send } from 'lucide-react'
+import { Download, FileCheck2, FileText, GitCompare, Loader2, Rocket, Send } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { cn, fmtDateTime } from '../../lib/utils'
 import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Empty, useToast } from '../../components/ui'
@@ -7,10 +8,15 @@ import { mdToHtml, toc } from '../../lib/md'
 import Wireframes from '../../components/Wireframes'
 
 const ORDER = ['BRD', 'FRD', 'SRS', 'CONCEPT_NOTE', 'BUSINESS_REQUIREMENTS', 'WIREFRAME',
-  'USER_STORIES', 'ACCEPTANCE_CRITERIA', 'API_REQUIREMENTS', 'NFR', 'SPRINT_PLAN']
+  'USER_STORIES', 'ACCEPTANCE_CRITERIA', 'API_REQUIREMENTS', 'NFR', 'SPRINT_PLAN',
+  // Phase 2 — sprint delivery (Agents 7-11)
+  'REFINED_BACKLOG', 'GROOMING_PACK', 'CODE_REVIEW', 'TEST_CASES', 'RELEASE_HANDOFF']
+
+const PHASE2 = new Set(['REFINED_BACKLOG', 'GROOMING_PACK', 'CODE_REVIEW', 'TEST_CASES', 'RELEASE_HANDOFF'])
 
 export default function GenerateBrd({ project, onBack }) {
   const toast = useToast()
+  const nav = useNavigate()
   const [artifacts, setArtifacts] = useState([])
   const [active, setActive] = useState(null)
   const [version, setVersion] = useState(null)
@@ -69,22 +75,38 @@ export default function GenerateBrd({ project, onBack }) {
             <Button variant="secondary"><Download className="h-3.5 w-3.5" /> Pack (Word)</Button>
           </a>
           <a href={api.packUrl(project.id, 'pdf', true)} target="_blank" rel="noreferrer">
-            <Button><Download className="h-3.5 w-3.5" /> Pack (PDF · approved)</Button>
+            <Button variant="secondary"><Download className="h-3.5 w-3.5" /> Pack (PDF · approved)</Button>
           </a>
+          <Button onClick={() => nav('/sprint-delivery')}>
+            <Rocket className="h-3.5 w-3.5" /> Continue to Sprint Delivery →
+          </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {artifacts.map((a) => (
-          <button key={a.id} onClick={() => open(a)}
-            className={cn('rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold transition-colors',
-              active?.id === a.id ? 'border-brand bg-brand text-brand-fg'
-                : 'border-line bg-surface text-muted hover:border-brand hover:text-brand')}>
-            {a.type.replaceAll('_', ' ')}
-            <span className="ml-1.5 font-mono opacity-70">v{a.current_version}</span>
-          </button>
-        ))}
-      </div>
+      {[['Phase 1 · Requirement Documentation', artifacts.filter((a) => !PHASE2.has(a.type))],
+        ['Phase 2 · Sprint Delivery (Agents 7-11)', artifacts.filter((a) => PHASE2.has(a.type))]]
+        .map(([label, group]) => group.length === 0 ? null : (
+        <div key={label} className="space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {group.map((a) => (
+              <button key={a.id} onClick={() => open(a)}
+                className={cn('rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold transition-colors',
+                  active?.id === a.id ? 'border-brand bg-brand text-brand-fg'
+                    : 'border-line bg-surface text-muted hover:border-brand hover:text-brand')}>
+                {a.type.replaceAll('_', ' ')}
+                <span className="ml-1.5 font-mono opacity-70">v{a.current_version}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      {!artifacts.some((a) => PHASE2.has(a.type)) && (
+        <div className="rounded-xl border border-line bg-bg/40 px-3.5 py-2.5 text-[12px] text-muted">
+          Phase 2 (Agents 7-11 — backlog, grooming, code review, QE, release) hasn't run for this
+          project yet. Use <button className="font-semibold text-brand underline" onClick={() => nav('/sprint-delivery')}>Sprint Delivery</button> to start it, then its artifacts appear here.
+        </div>
+      )}
 
       {version && (
         <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
