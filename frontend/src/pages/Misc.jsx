@@ -364,12 +364,28 @@ export function Integrations() {
   const [health, setHealth] = useState(null)
   const [probe, setProbe] = useState(null)
   const [probing, setProbing] = useState(false)
+  const [jira, setJira] = useState(null)
+  const [jiraBusy, setJiraBusy] = useState(false)
+  const [writeTest, setWriteTest] = useState(false)
   useEffect(() => { api.health().then(setHealth).catch(() => {}) }, [])
   const ints = health?.integrations ?? {}
 
   // Ask Stitch what it actually returns, and print it. This is here as a BUTTON rather than a raw
   // endpoint because the alternative — me inferring the response shape from a screenshot — has been
   // wrong four times running. One click, one payload, one fix.
+  // Read-only by default: a demo run writes ~9 issues per project, so verifying credentials must
+  // not quietly add anything to a real backlog. The write test is opt-in and cleans up after itself.
+  const runJira = async () => {
+    setJiraBusy(true)
+    try {
+      setJira(await api.get(`/api/integrations/jira/probe?create_test_issue=${writeTest}&cleanup=true`))
+    } catch (e) {
+      setJira({ mode: 'error', verdict: e.message, checks: [] })
+    } finally {
+      setJiraBusy(false)
+    }
+  }
+
   const runProbe = async () => {
     setProbing(true)
     try {
@@ -427,6 +443,57 @@ export function Integrations() {
           )
         })}
       </div>
+
+      <Card>
+        <CardHeader>
+          <FolderKanban className="h-4 w-4 text-brand" />
+          <CardTitle>Jira connection</CardTitle>
+          <label className="ml-auto flex items-center gap-1.5 text-[11.5px] text-muted">
+            <input type="checkbox" checked={writeTest} onChange={(e) => setWriteTest(e.target.checked)} />
+            Also create a test issue
+          </label>
+          <Button size="sm" variant="secondary" onClick={runJira} loading={jiraBusy}>
+            Test Jira connection
+          </Button>
+        </CardHeader>
+        <CardBody>
+          <p className="text-[12px] text-muted">
+            Checks credentials, the project key, the issue types the agents need, and the
+            story-points field — read-only unless you tick the box. A run creates roughly 9 issues
+            per project, so verify here before pointing it at a real backlog.
+          </p>
+          {jira && (
+            <>
+              <div className={cn('mt-3 rounded-lg px-3 py-2 text-[12px] font-medium',
+                jira.ok ? 'bg-success/10 text-success'
+                        : jira.mode === 'mock' ? 'bg-warning/10 text-warning' : 'bg-danger/10 text-danger')}>
+                {jira.mode === 'mock' ? jira.reason : (jira.verdict || '')}
+              </div>
+              {jira.checks?.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {jira.checks.map((ch, i) => (
+                    <div key={i} className="flex items-start gap-2 text-[12px]">
+                      {ch.ok
+                        ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+                        : <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" />}
+                      <span className="font-medium text-ink">{ch.name}</span>
+                      <span className="text-muted">{ch.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {jira.test_issue && (
+                <p className="mt-3 text-[12px]">
+                  Test issue:{' '}
+                  <a href={jira.test_issue.url} target="_blank" rel="noreferrer"
+                     className="font-semibold text-brand underline">{jira.test_issue.key}</a>{' '}
+                  <span className="text-muted">({jira.test_issue.type})</span>
+                </p>
+              )}
+            </>
+          )}
+        </CardBody>
+      </Card>
 
       <Card>
         <CardHeader>

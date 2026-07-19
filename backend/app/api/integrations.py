@@ -327,3 +327,139 @@ def clear_outbox():
     from app.adapters import outbox
 
     return {"cleared": outbox.clear()}
+
+
+@router.get("/jira/probe")
+def jira_probe(create_test_issue: bool = False, cleanup: bool = True):
+    """Verify Jira credentials and show exactly what a run would create — before it creates it.
+
+    READ-ONLY by default. A demo run writes ~9 issues per project (and Flow 2 adds test tickets and
+    bugs), so this must never quietly pollute a real backlog: the write test is opt-in, creates a
+    single clearly-labelled issue, and deletes it again unless asked not to.
+
+    It also resolves the story-points field id, which is the one thing most likely to be silently
+    wrong: `customfield_10016` is only Jira's default, and an instance that renamed or remapped it
+    would accept every issue while dropping the estimate.
+    """
+    import httpx
+
+    out: dict[str, Any] = {
+        "mode": "mock",
+        "reason": "",
+        "project_key": settings.jira_project_key,
+        "checks": [],
+    }
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        out["checks"].append({"name": name, "ok": ok, "detail": detail})
+
+    # ── configuration ────────────────────────────────────────────────────────
+    if settings.is_mocked("jira"):
+        out["reason"] = ("Jira is mocked. Set JIRA_MOCK=false (plus credentials) to write for real — "
+                         "MOCK_MODE=true mocks every service unless a service overrides it.")
+        check("Configuration", False, out["reason"])
+        return out
+    if not (settings.jira_token and settings.jira_base_url):
+        out["reason"] = "JIRA_BASE_URL and JIRA_TOKEN are required."
+        check("Configuration", False, out["reason"])
+        return out
+
+    out["mode"] = "live"
+    base = settings.jira_base_url.rstrip("/")
+    auth = (settings.jira_email, settings.jira_token)
+    key = settings.jira_project_key
+    check("Configuration", True, f"{base} · project {key} · as {settings.jira_email}")
+
+    try:
+        with httpx.Client(timeout=25, auth=auth) as c:
+            # 1) authentication
+            r = c.get(f"{base}/rest/api/3/myself")
+            if r.status_code == 401:
+                check("Authentication", False, "401 — the email/API-token pair was rejected.")
+                return out
+            r.raise_for_status()
+            me = r.json()
+            check("Authentication", True,
+                  f"{me.get('displayName')} <{me.get('emailAddress') or settings.jira_email}>")
+
+            # 2) the project exists and we can see it
+            rp = c.get(f"{base}/rest/api/3/project/{key}")
+            if rp.status_code == 404:
+                check("Project", False, f"No project with key '{key}' is visible to this account.")
+                return out
+            rp.raise_for_status()
+            proj = rp.json()
+            types = [t["name"] for t in proj.get("issueTypes", [])]
+            out["issue_types"] = types
+            check("Project", True, f"{proj.get('name')} ({key}) · issue types: {', '.join(types[:6])}")
+            for needed in ("Epic", "Story"):
+                check(f"Issue type '{needed}'", needed in types,
+                      "present" if needed in types else
+                      f"missing — the Sprint agent creates {needed} issues and would fail.")
+            if "Bug" not in types:
+                check("Issue type 'Bug'", False, "missing — Flow 2 raises Bug issues at QE.")
+
+            # 3) the story-points field — the silent-failure candidate
+            rf = c.get(f"{base}/rest/api/3/field")
+            rf.raise_for_status()
+            sp = [f for f in rf.json()
+                  if "story point" in (f.get("name") or "").lower() and f.get("id", "").startswith("customfield")]
+            configured = "customfield_10016"
+            if sp:
+                ids = [f["id"] for f in sp]
+                out["story_points_field"] = ids[0]
+                check("Story-points field", configured in ids,
+                      f"this instance uses {', '.join(ids)}; the adapter writes {configured}."
+                      + ("" if configured in ids else
+                         " Issues will be created but estimates will be dropped — set it to match."))
+            else:
+                out["story_points_field"] = None
+                check("Story-points field", False,
+                      "not found on this instance — estimates will not be stored.")
+
+            # 4) permission to create
+            rperm = c.get(f"{base}/rest/api/3/mypermissions",
+                          params={"projectKey": key, "permissions": "CREATE_ISSUES"})
+            if rperm.status_code == 200:
+                allowed = rperm.json().get("permissions", {}).get("CREATE_ISSUES", {}).get("havePermission")
+                check("Create-issue permission", bool(allowed),
+                      "granted" if allowed else "this account cannot create issues in that project.")
+
+            # 5) optional write test — one labelled issue, removed again by default
+            if create_test_issue:
+                itype = "Task" if "Task" in types else ("Story" if "Story" in types else types[0])
+                body = {"fields": {
+                    "project": {"key": key},
+                    "summary": "[agentic-sdlc] connection test — safe to delete",
+                    "issuetype": {"name": itype},
+                    "description": {"type": "doc", "version": 1, "content": [
+                        {"type": "paragraph", "content": [
+                            {"type": "text", "text": "Created by the Agentic SDLC Platform connection test."}]}]},
+                    "labels": ["agentic-sdlc", "connection-test"],
+                }}
+                rc = c.post(f"{base}/rest/api/3/issue", json=body)
+                if rc.status_code >= 300:
+                    check("Write test", False, f"{rc.status_code} — {rc.text[:200]}")
+                else:
+                    created = rc.json()
+                    out["test_issue"] = {"key": created["key"],
+                                         "url": f"{base}/browse/{created['key']}",
+                                         "type": itype}
+                    check("Write test", True, f"created {created['key']} ({itype})")
+                    if cleanup:
+                        rd = c.delete(f"{base}/rest/api/3/issue/{created['key']}")
+                        check("Cleanup", rd.status_code in (204, 200),
+                              "test issue deleted" if rd.status_code in (204, 200)
+                              else f"could not delete {created['key']} — remove it manually.")
+                    else:
+                        check("Cleanup", True, f"left in place: {created['key']}")
+    except Exception as e:
+        # A probe that throws tells you nothing. Whatever goes wrong — DNS, TLS, proxy, a missing
+        # optional dependency — is reported as a failed check, never a 500.
+        check("Connection", False, f"{type(e).__name__}: {str(e)[:200]}")
+
+    out["ok"] = all(c["ok"] for c in out["checks"])
+    out["verdict"] = ("Jira is correctly configured — a run will create real issues."
+                      if out.get("ok") else
+                      "Something is not right; see the failed checks above.")
+    return out
