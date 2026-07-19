@@ -37,15 +37,33 @@ def derive_key(name: str) -> str:
     return key[:10]
 
 
+def _is_mock() -> bool:
+    return settings.is_mocked("jira") or not (settings.jira_token and settings.jira_base_url)
+
+
 def _stored(project: Project) -> str | None:
-    return ((project.context or {}).get("jira") or {}).get("project_key")
+    """A remembered key — but only if it was resolved in the SAME mode we are in now.
+
+    The mock tracker fabricates a project for any key, so a mock run would store an invented key
+    like CFSSBP. Switching to live Jira then reused it and every issue failed with "the target
+    project doesn't exist". Mock state must never leak into a live run, so the mode is stored
+    alongside the key and a mismatch re-resolves from scratch.
+    """
+    jira = (project.context or {}).get("jira") or {}
+    if not jira.get("project_key"):
+        return None
+    if bool(jira.get("mock", False)) != _is_mock():
+        log.info("jira.stored_key_ignored", key=jira["project_key"],
+                 stored_mock=jira.get("mock"), now_mock=_is_mock())
+        return None
+    return jira["project_key"]
 
 
 def _store(db, project: Project, info: dict[str, Any]) -> None:
     # Reassign the whole dict so SQLAlchemy sees the JSON mutation.
     project.context = {**(project.context or {}),
                        "jira": {"project_key": info["key"], "url": info.get("url", ""),
-                                "created": info.get("created", False)}}
+                                "created": info.get("created", False), "mock": _is_mock()}}
     db.commit()
 
 
@@ -77,4 +95,14 @@ def resolve_project_key(db, project: Project) -> str:
         log.warning("jira.auto_create_exhausted", project=project.name)
 
     # Last resort: the configured global project. A run must not fail because provisioning did.
-    return settings.jira_project_key
+    # Verify it in live mode — handing back a key that does not exist just moves the failure.
+    fallback = settings.jira_project_key
+    if not _is_mock():
+        try:
+            if tracker.find_project(fallback):
+                _store(db, project, {"key": fallback, "url": "", "created": False})
+            else:
+                log.error("jira.fallback_missing", key=fallback)
+        except Exception as e:
+            log.warning("jira.fallback_check_failed", key=fallback, error=str(e))
+    return fallback
