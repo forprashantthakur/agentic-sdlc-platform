@@ -16,8 +16,9 @@ from app.adapters import registry
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.schemas import SPRINT_PLAN
 from app.core.config import settings
+from app.services.jira_project import resolve_project_key
 from app.core.logging import log
-from app.models import ArtifactType
+from app.models import ArtifactType, Project
 
 PROMPT = """PROJECT: {project}
 
@@ -75,7 +76,8 @@ class SprintAgent(BaseAgent):
         issues = self._to_jira_issues(plan, stories)
         try:
             created = registry.tracker().create_issues(
-                project_key=settings.jira_project_key, issues=issues
+                project_key=resolve_project_key(self.ctx.db, self.ctx.db.get(Project, self.ctx.project_id)),
+                issues=issues
             )
             plan["jira"] = created
         except Exception as e:  # a Jira outage must not lose the plan

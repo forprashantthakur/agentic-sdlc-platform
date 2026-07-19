@@ -77,6 +77,49 @@ class JiraAdapter:
             self._sp_field = ""
         return self._sp_field or None
 
+    def find_project(self, key: str) -> dict[str, Any] | None:
+        try:
+            with httpx.Client(timeout=20, auth=self.auth) as c:
+                r = c.get(f"{self.base}/rest/api/3/project/{key}")
+                if r.status_code == 200:
+                    d = r.json()
+                    return {"key": d["key"], "name": d.get("name", ""),
+                            "url": f"{self.base}/browse/{d['key']}", "created": False}
+        except Exception as e:
+            log.warning("jira.find_project_failed", key=key, error=str(e))
+        return None
+
+    def create_project(self, *, key: str, name: str) -> dict[str, Any]:
+        """Create a Scrum software project.
+
+        Deliberately the SCRUM SOFTWARE template: it ships with Story, Bug and story points, which
+        a business/finance template does not — so auto-provisioning also gives the agents the issue
+        types they actually want, instead of falling back to Task.
+
+        Creating projects needs Jira admin rights. If the account lacks them this raises, and the
+        caller falls back to the configured project rather than failing the run.
+        """
+        with httpx.Client(timeout=45, auth=self.auth) as c:
+            me = c.get(f"{self.base}/rest/api/3/myself")
+            me.raise_for_status()
+            lead = me.json()["accountId"]
+            body = {
+                "key": key,
+                "name": name[:80],
+                "projectTypeKey": "software",
+                "projectTemplateKey": "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum",
+                "leadAccountId": lead,
+                "assigneeType": "PROJECT_LEAD",
+                "description": "Auto-created by the HDFC Agentic SDLC Platform.",
+            }
+            r = c.post(f"{self.base}/rest/api/3/project", json=body)
+            if r.status_code >= 300:
+                raise RuntimeError(f"{r.status_code}: {r.text[:200]}")
+            d = r.json()
+        log.info("jira.project_created", key=key, name=name)
+        return {"key": d.get("key", key), "name": name,
+                "url": f"{self.base}/browse/{d.get('key', key)}", "created": True}
+
     def create_issues(self, *, project_key, issues) -> list[dict[str, Any]]:
         created: list[dict[str, Any]] = []
         key_by_local: dict[str, str] = {}
@@ -110,6 +153,16 @@ class JiraAdapter:
                 "type": issue["type"], "summary": issue["summary"],
             })
         return created
+
+    def find_project(self, key: str) -> dict[str, Any] | None:
+        return {"key": key, "name": key, "mock": True,
+                "url": f"https://hdfcbank.atlassian.net/browse/{key}", "created": False}
+
+    def create_project(self, *, key: str, name: str) -> dict[str, Any]:
+        log.info("jira.mock.project_created", key=key, name=name)
+        return {"key": key, "name": name, "mock": True,
+                "url": f"https://hdfcbank.atlassian.net/jira/software/projects/{key}/boards/1",
+                "created": True}
 
     def create_tests(self, *, project_key, tests) -> list[dict[str, Any]]:
         return self.create_issues(project_key=project_key, issues=[
@@ -168,6 +221,16 @@ class MockJiraAdapter:
             out.append(rec)
         log.info("jira.mock.create", count=len(out), project=project_key)
         return out
+
+    def find_project(self, key: str) -> dict[str, Any] | None:
+        return {"key": key, "name": key, "mock": True,
+                "url": f"https://hdfcbank.atlassian.net/browse/{key}", "created": False}
+
+    def create_project(self, *, key: str, name: str) -> dict[str, Any]:
+        log.info("jira.mock.project_created", key=key, name=name)
+        return {"key": key, "name": name, "mock": True,
+                "url": f"https://hdfcbank.atlassian.net/jira/software/projects/{key}/boards/1",
+                "created": True}
 
     def create_tests(self, *, project_key, tests) -> list[dict[str, Any]]:
         out = []

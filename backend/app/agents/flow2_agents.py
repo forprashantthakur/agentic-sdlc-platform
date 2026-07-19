@@ -16,8 +16,14 @@ from app.adapters import registry
 from app.agents import schemas
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
+from app.services.jira_project import resolve_project_key
 from app.core.logging import log
-from app.models import ArtifactType
+from app.models import ArtifactType, Project
+
+
+def _key(ctx) -> str:
+    """This project's own Jira project — not one shared backlog for every requirement."""
+    return resolve_project_key(ctx.db, ctx.db.get(Project, ctx.project_id))
 
 
 def _stories_block(ctx) -> str:
@@ -54,7 +60,7 @@ class BacklogRefinementAgent(BaseAgent):
             log.warning("confluence.publish_failed", error=str(e))
         try:
             issues = registry.tracker().create_issues(
-                project_key=settings.jira_project_key,
+                project_key=_key(self.ctx),
                 issues=[{"type": "Story", "local_id": s.get("id", f"s{i}"),
                          "summary": s.get("title", ""), "story_points": s.get("estimate_points"),
                          "labels": ["flow2", "refined"]}
@@ -136,10 +142,10 @@ class TestQEAgent(BaseAgent):
         tests, bugs = [], []
         try:
             tests = registry.tracker().create_tests(
-                project_key=settings.jira_project_key, tests=payload.get("test_cases", []))
+                project_key=_key(self.ctx), tests=payload.get("test_cases", []))
             if payload.get("bugs"):
                 bugs = registry.tracker().create_bugs(
-                    project_key=settings.jira_project_key, bugs=payload["bugs"])
+                    project_key=_key(self.ctx), bugs=payload["bugs"])
         except Exception as e:
             log.warning("jira.qe_sync_failed", error=str(e))
         v = self.commit(ArtifactType.TEST_CASES, payload,

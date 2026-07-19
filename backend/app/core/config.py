@@ -149,6 +149,9 @@ class Settings(BaseSettings):
     # Issue-type names and the story-points field vary by Jira project template and by instance.
     # A business/finance project has no Story or Bug at all, so the adapter falls back to Task
     # rather than failing the run — see JiraAdapter._resolve_type.
+    # Create a Jira project per platform project. Off by default: creating projects needs Jira
+    # admin rights and is not trivially undoable, so it is an explicit choice.
+    jira_auto_create_project: bool = False
     jira_epic_type: str = "Epic"
     jira_story_type: str = "Story"
     jira_bug_type: str = "Bug"
