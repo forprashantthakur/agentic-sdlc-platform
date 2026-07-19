@@ -159,6 +159,13 @@ export default function AppShell({ children, pending = 0, intakeCount = 0, proje
           </div>
           <div className="flex items-center gap-2">
             {health?.integrations && <PoweredBy ints={health.integrations} />}
+            {health?.build && (
+              <Tooltip label={`Backend build ${health.build}. If a fix seems missing, check this matches the latest commit — a deploy that has not landed looks exactly like a bug that was not fixed.`}>
+                <span className="rounded-md border border-line px-2 py-1 font-mono text-[10.5px] text-muted">
+                  {health.build}
+                </span>
+              </Tooltip>
+            )}
             <Tooltip label={copilot ? 'Hide AI Copilot' : 'Show AI Copilot'}>
               <button onClick={() => setCopilot((c) => !c)}
                 className="h-9 w-9 grid place-items-center rounded-lg text-muted hover:text-ink hover:bg-bg transition-colors">

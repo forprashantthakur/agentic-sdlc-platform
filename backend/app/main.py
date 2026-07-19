@@ -53,5 +53,21 @@ app.include_router(intake.router)
 
 @app.get("/health", tags=["ops"])
 def health():
-    """Reports exactly which integrations are live vs mocked — so nobody demos a 'live' run by accident."""
-    return {"status": "ok", "env": settings.app_env, "integrations": registry.describe()}
+    """Reports exactly which integrations are live vs mocked — so nobody demos a 'live' run by accident.
+
+    Also reports WHICH BUILD is running. Several diagnoses in this project were wasted on a fix that
+    had not deployed yet, with no way to tell from the UI. Render sets RENDER_GIT_COMMIT; if a
+    reported bug does not match the code, compare this first.
+    """
+    import os
+
+    commit = (os.environ.get("RENDER_GIT_COMMIT")
+              or os.environ.get("GIT_COMMIT")
+              or os.environ.get("SOURCE_VERSION") or "")
+    return {
+        "status": "ok",
+        "env": settings.app_env,
+        "build": commit[:7] or "unknown",
+        "build_full": commit,
+        "integrations": registry.describe(),
+    }
