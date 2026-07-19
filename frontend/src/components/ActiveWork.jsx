@@ -1,4 +1,4 @@
-import { ArrowRight, Loader2, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Loader2, ShieldCheck, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -35,6 +35,17 @@ export default function ActiveWork() {
     return () => clearInterval(t)
   }, [])
 
+  const dismiss = async (e, r) => {
+    e.stopPropagation()
+    await api.abandonRun(r.id).catch(() => {})
+    setRuns((rs) => rs.filter((x) => x.id !== r.id))
+  }
+
+  const clearAll = async () => {
+    await api.abandonStale().catch(() => {})
+    setRuns([])
+  }
+
   if (runs.length === 0) return null
 
   const nameOf = (pid) => projects.find((p) => p.id === pid)?.name || 'Project'
@@ -70,11 +81,25 @@ export default function ActiveWork() {
                 {isFlow2 ? 'Sprint Delivery' : 'BRD'} · {waiting ? 'awaiting approval' : r.status.toLowerCase()}
               </span>
               <ArrowRight className="h-3.5 w-3.5 text-brand opacity-0 transition-opacity group-hover:opacity-100" />
+              <span
+                role="button"
+                title="Abandon this run"
+                onClick={(e) => dismiss(e, r)}
+                className="rounded p-0.5 text-muted hover:bg-danger/10 hover:text-danger"
+              >
+                <X className="h-3 w-3" />
+              </span>
             </button>
           )
         })}
         {runs.length > 3 && (
           <span className="text-[11px] text-muted">+{runs.length - 3} more</span>
+        )}
+        {runs.length > 1 && (
+          <button onClick={clearAll}
+            className="ml-auto text-[11px] font-semibold text-muted underline hover:text-danger">
+            Clear all ({runs.length})
+          </button>
         )}
       </div>
     </div>

@@ -1,10 +1,10 @@
 /** The supporting pages: real where the backend supports it, honest where it doesn't. */
 import { Blocks, Bot, CheckCircle2, Database, FileStack, FolderKanban, Layers, Search, Settings as SettingsIcon, ShieldCheck, Trash2, XCircle } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { cn, fmtDate, fmtDateTime, titleCase } from '../lib/utils'
-import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Confidence, Empty, Input, Label, Select, Skeleton, Tooltip } from '../components/ui'
+import { Badge, Button, Card, CardBody, CardHeader, CardTitle, Confidence, Empty, Input, Label, Select, Skeleton, Tooltip, useToast } from '../components/ui'
 import DeleteProject from '../components/DeleteProject'
 
 const STATUS_TONE = {
@@ -13,11 +13,15 @@ const STATUS_TONE = {
 }
 
 export function Projects({ setProject, onSeed }) {
+  const [cleanup, setCleanup] = useState(null)
+  const [cleaning, setCleaning] = useState(false)
   const nav = useNavigate()
+  const toast = useToast()
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
   const [doomed, setDoomed] = useState(null)   // the project pending deletion
-  useEffect(() => { api.projects().then(setRows).catch(() => setRows([])) }, [])
+  const load = useCallback(() => { api.projects().then(setRows).catch(() => setRows([])) }, [])
+  useEffect(() => { load() }, [load])
   if (!rows) return <Skeleton className="h-64" />
 
   const filtered = rows.filter((p) => `${p.name} ${p.business_unit}`.toLowerCase().includes(q.toLowerCase()))
@@ -35,8 +39,40 @@ export function Projects({ setProject, onSeed }) {
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className="pl-9" />
           </div>
           <Button variant="secondary" onClick={onSeed}>Demo library</Button>
+          <Button variant="ghost" onClick={async () => setCleanup(await api.cleanupPreview().catch(() => null))}>
+            <Trash2 className="h-3.5 w-3.5" /> Clean up
+          </Button>
         </div>
       </div>
+
+      {cleanup && (
+        <Card>
+          <CardBody className="space-y-2">
+            <p className="text-[13px] font-semibold">
+              {cleanup.deletable} of {cleanup.total_projects} projects produced no documents.
+            </p>
+            <p className="text-[12px] text-muted">
+              Deleting these removes false starts only. The {cleanup.kept} projects that produced a
+              document pack are kept — bulk-deleting somebody's work on one click is not a feature.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <Button
+                onClick={async () => {
+                  setCleaning(true)
+                  const r = await api.cleanupEmpty().catch(() => null)
+                  setCleaning(false)
+                  setCleanup(null)
+                  if (r) { toast(`Deleted ${r.deleted} empty project(s)`, { tone: 'success' }); load() }
+                }}
+                loading={cleaning}
+              >
+                Delete {cleanup.deletable} empty project(s)
+              </Button>
+              <Button variant="secondary" onClick={() => setCleanup(null)}>Cancel</Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       <DeleteProject
         project={doomed}

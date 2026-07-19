@@ -381,3 +381,42 @@ def discovery_sample(project_id: str, db: Session = Depends(get_session)):
             f"demo projects — a real project's interview is the user's to give.",
         )
     return {"project": project.name, "answers": answers}
+
+
+@router.get("/cleanup/preview")
+def cleanup_preview(db: Session = Depends(get_session)):
+    """What a cleanup WOULD delete. Never deletes anything.
+
+    Scoped deliberately to projects that produced no artifacts: an empty project is a false start,
+    while one with a document pack is somebody's work. Bulk-deleting the latter on a single click
+    is not a feature, it is an incident.
+    """
+    from app.models import Artifact
+
+    rows = db.scalars(select(Project).order_by(Project.created_at.desc())).all()
+    empty = []
+    for p in rows:
+        n = db.scalar(select(func.count()).select_from(Artifact).where(Artifact.project_id == p.id)) or 0
+        if n == 0:
+            empty.append({"id": p.id, "name": p.name, "created_at": p.created_at.isoformat()})
+    return {"total_projects": len(rows), "deletable": len(empty),
+            "kept": len(rows) - len(empty), "projects": empty[:200]}
+
+
+@router.post("/cleanup")
+def cleanup(confirm: str = "", db: Session = Depends(get_session)):
+    """Delete every project that produced no artifacts. Requires ?confirm=DELETE-EMPTY."""
+    from app.models import Artifact
+
+    if confirm != "DELETE-EMPTY":
+        raise HTTPException(400, "Pass ?confirm=DELETE-EMPTY to proceed.")
+
+    rows = db.scalars(select(Project)).all()
+    deleted = 0
+    for p in rows:
+        n = db.scalar(select(func.count()).select_from(Artifact).where(Artifact.project_id == p.id)) or 0
+        if n == 0:
+            db.delete(p)          # cascades to sources, runs and events
+            deleted += 1
+    db.commit()
+    return {"deleted": deleted}

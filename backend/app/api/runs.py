@@ -137,3 +137,49 @@ async def stream(run_id: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/{run_id}/abandon")
+def abandon(run_id: str, db: Session = Depends(get_session)):
+    """Mark a stuck run as abandoned so it leaves the In-progress bar.
+
+    A run suspended at a gate nobody will ever approve stays WAITING_APPROVAL forever and clutters
+    every "what am I working on" view. This closes it out. Artifacts and the audit trail are kept —
+    the run is recorded as abandoned, not erased.
+    """
+    from app.models import RunEvent, RunStatus
+
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.REJECTED):
+        return {"run_id": run_id, "status": run.status.value, "changed": False}
+
+    run.status = RunStatus.REJECTED
+    db.add(RunEvent(run_id=run_id, node="finalise", level="warning",
+                    message="Run abandoned by the user — no further agents will execute."))
+    # Any approval still waiting on this run is moot.
+    from app.models import Approval, ApprovalStatus
+
+    for a in db.scalars(select(Approval).where(
+            Approval.run_id == run_id, Approval.status == ApprovalStatus.PENDING)):
+        a.status = ApprovalStatus.EXPIRED
+    db.commit()
+    return {"run_id": run_id, "status": run.status.value, "changed": True}
+
+
+@router.post("/abandon-stale")
+def abandon_stale(db: Session = Depends(get_session)):
+    """Close out every run still in flight. Used to clear a demo environment in one action."""
+    from app.models import Approval, ApprovalStatus, RunEvent, RunStatus
+
+    runs = list(db.scalars(select(Run).where(
+        Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING, RunStatus.WAITING_APPROVAL]))))
+    for r in runs:
+        r.status = RunStatus.REJECTED
+        db.add(RunEvent(run_id=r.id, node="finalise", level="warning",
+                        message="Run abandoned in bulk cleanup."))
+    for a in db.scalars(select(Approval).where(Approval.status == ApprovalStatus.PENDING)):
+        a.status = ApprovalStatus.EXPIRED
+    db.commit()
+    return {"abandoned": len(runs)}

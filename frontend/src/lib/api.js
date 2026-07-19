@@ -50,6 +50,10 @@ export const api = {
 
   startRun: (b) => req('/api/runs', { method: 'POST', body: JSON.stringify(b) }),
   startFlow2: (b) => req('/api/runs/flow2', { method: 'POST', body: JSON.stringify(b) }),
+  abandonRun: (id) => req(`/api/runs/${id}/abandon`, { method: 'POST' }),
+  abandonStale: () => req('/api/runs/abandon-stale', { method: 'POST' }),
+  cleanupPreview: () => req('/api/projects/cleanup/preview'),
+  cleanupEmpty: () => req('/api/projects/cleanup?confirm=DELETE-EMPTY', { method: 'POST' }),
   runs: (pid) => req(`/api/runs${pid ? `?project_id=${pid}` : ''}`),
   events: (id, after = 0) => req(`/api/runs/${id}/events?after=${after}`),
 
