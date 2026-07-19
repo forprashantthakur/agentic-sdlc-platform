@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from app.core import progress
 from app.core.config import settings
 from app.core.logging import log
 
@@ -143,9 +144,7 @@ class JiraAdapter:
                         fields["parent"] = {"key": pk}
 
             with httpx.Client(timeout=45) as c:
-                r = c.post(f"{self.base}/rest/api/3/issue", json={"fields": fields}, auth=self.auth)
-                r.raise_for_status()
-                data = r.json()
+                data = self._post_issue(c, fields)
 
             key_by_local[issue["local_id"]] = data["key"]
             created.append({
@@ -163,6 +162,45 @@ class JiraAdapter:
         return {"key": key, "name": name, "mock": True,
                 "url": f"https://hdfcbank.atlassian.net/jira/software/projects/{key}/boards/1",
                 "created": True}
+
+    @staticmethod
+    def _jira_error(r) -> str:
+        """Jira puts the real reason in the BODY. raise_for_status() throws it away, which is how a
+        400 becomes '400 Bad Request' and tells you nothing about which field it rejected."""
+        try:
+            d = r.json()
+            parts = list(d.get("errorMessages") or [])
+            parts += [f"{k}: {v}" for k, v in (d.get("errors") or {}).items()]
+            return "; ".join(parts) or r.text[:300]
+        except Exception:
+            return r.text[:300]
+
+    # Fields Jira may legitimately reject depending on project type and configuration. Dropping
+    # them costs metadata; keeping them costs the whole issue.
+    _OPTIONAL = ("parent", "labels", "customfield_10016")
+
+    def _post_issue(self, c, fields: dict[str, Any]) -> dict[str, Any]:
+        r = c.post(f"{self.base}/rest/api/3/issue", json={"fields": fields}, auth=self.auth)
+        if r.status_code < 300:
+            return r.json()
+        detail = self._jira_error(r)
+
+        # A 400 is usually one unsupported field, not a broken request. Retry once with the
+        # optional ones removed rather than losing the story entirely — and say what was dropped.
+        if r.status_code == 400:
+            slim = {k: v for k, v in fields.items()
+                    if k not in self._OPTIONAL and not k.startswith("customfield_")}
+            r2 = c.post(f"{self.base}/rest/api/3/issue", json={"fields": slim}, auth=self.auth)
+            if r2.status_code < 300:
+                dropped = sorted(set(fields) - set(slim))
+                log.warning("jira.created_without_fields", dropped=dropped, reason=detail[:200])
+                progress.emit(
+                    f"Jira accepted the issue only after dropping {', '.join(dropped)} — {detail[:160]}",
+                    level="warning")
+                return r2.json()
+            detail = f"{detail} | retry without {self._OPTIONAL}: {self._jira_error(r2)}"
+
+        raise RuntimeError(f"Jira {r.status_code}: {detail}")
 
     def create_tests(self, *, project_key, tests) -> list[dict[str, Any]]:
         return self.create_issues(project_key=project_key, issues=[
