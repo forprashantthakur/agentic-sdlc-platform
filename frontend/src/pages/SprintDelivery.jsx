@@ -32,28 +32,65 @@ export default function SprintDelivery() {
   const [busy, setBusy] = useState('')
   const [run, setRun] = useState(null)
   const [events, setEvents] = useState([])
+  const [pending, setPending] = useState([])
+  const [deciding, setDeciding] = useState('')
 
   const loadProjects = useCallback(() => { api.projects().then(setProjects).catch(() => {}) }, [])
   useEffect(() => { loadProjects() }, [loadProjects])
 
-  // poll the active Flow-2 run
+  // On mount, reconnect to an in-progress Flow-2 run. Leaving this page to approve used to unmount
+  // it and lose the run, which read as "the pipeline never advanced" when in fact it had.
   useEffect(() => {
-    if (!run) return undefined
+    (async () => {
+      try {
+        const runs = await api.runs()
+        const f2 = runs.filter((r) => (r.thread_id || '').startsWith('f2-')
+          && !['COMPLETED', 'FAILED', 'REJECTED'].includes(r.status))
+        if (f2[0]) {
+          const projs = await api.projects().catch(() => [])
+          const pr = projs.find((x) => x.id === f2[0].project_id)
+          setRun({ id: f2[0].id, project_id: f2[0].project_id,
+                   project_name: pr?.name || 'Project', status: f2[0].status })
+        }
+      } catch { /* nothing in progress */ }
+    })()
+  }, [])
+
+  // Poll the SPECIFIC run by id — not "the newest f2 run", which drifts to another attempt when
+  // several exist. Also load this run's pending gate so it can be decided in place.
+  useEffect(() => {
+    if (!run?.id) return undefined
     const tick = async () => {
       try {
-        const runs = await api.runs(run.project_id)
-        const f2 = runs.filter((r) => (r.thread_id || '').startsWith('f2-'))
-        const latest = f2[0]
-        if (latest) {
-          setRun((prev) => ({ ...prev, id: latest.id, status: latest.status }))
-          setEvents(await api.events(latest.id))
+        const j = await api.get(`/api/runs/${run.id}`)
+        setRun((prev) => ({ ...prev, status: j.status }))
+        setEvents(await api.events(run.id))
+        if (j.status === 'WAITING_APPROVAL') {
+          const aps = await api.approvals(run.project_id)
+          setPending(aps.filter((a) => a.status === 'PENDING' && a.run_id === run.id))
+        } else {
+          setPending([])
         }
       } catch { /* transient */ }
     }
     tick()
     const t = setInterval(tick, 2500)
     return () => clearInterval(t)
-  }, [run?.project_id])
+  }, [run?.id, run?.project_id])
+
+  const decide = async (approval, decision) => {
+    setDeciding(approval.id)
+    try {
+      await api.decide(approval.id, { decision, comments: [] })
+      setPending((ps) => ps.filter((a) => a.id !== approval.id))
+      toast(decision === 'APPROVED' ? 'Approved — pipeline resuming' : 'Changes requested',
+            { tone: decision === 'APPROVED' ? 'success' : 'warning' })
+    } catch (e) {
+      toast('Could not record the decision', { detail: e.message, tone: 'error' })
+    } finally {
+      setDeciding('')
+    }
+  }
 
   const start = async (p) => {
     setBusy(p.id)
@@ -165,11 +202,26 @@ export default function SprintDelivery() {
                   )
                 })}
                 {run.status === 'WAITING_APPROVAL' && (
-                  <div className="mt-3 rounded-lg bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
-                    Awaiting an approval. Decide it in the{' '}
-                    <button className="font-semibold underline" onClick={() => nav('/review')}>Review Center</button>{' '}
-                    or the{' '}
-                    <button className="font-semibold underline" onClick={() => nav('/outbox')}>Approval Outbox</button>.
+                  <div className="mt-3 space-y-2">
+                    {pending.length === 0 ? (
+                      <div className="rounded-lg bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
+                        Awaiting an approval — loading the pending gate…
+                      </div>
+                    ) : pending.map((a) => (
+                      <div key={a.id} className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5">
+                        <p className="text-[12px] font-semibold text-ink">
+                          {a.gate.replaceAll('_', ' ')} · approver {a.approver_email}
+                        </p>
+                        <p className="mb-2 text-[11px] text-muted">
+                          Decide here, or open the email in the Approval Outbox.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" onClick={() => decide(a, 'APPROVED')} loading={deciding === a.id}>Approve</Button>
+                          <Button size="sm" variant="secondary" onClick={() => decide(a, 'CHANGES_REQUESTED')} loading={deciding === a.id}>Request changes</Button>
+                          <button className="ml-auto text-[11px] font-semibold text-brand underline" onClick={() => nav('/outbox')}>View email</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
                 {run.status === 'COMPLETED' && (
