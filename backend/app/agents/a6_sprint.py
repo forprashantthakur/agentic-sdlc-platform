@@ -80,6 +80,7 @@ class SprintAgent(BaseAgent):
         try:
             created = registry.tracker().create_issues(project_key=pkey, issues=issues)
             plan["jira"] = created
+            plan["jira_run_label"] = self._run_label
             progress.emit(f"Jira: {len(created)} issue(s) created in project {pkey}.")
         except Exception as e:  # a Jira outage must not lose the plan
             # ...but it must not be SILENT either. A swallowed integration error leaves the user
@@ -109,6 +110,11 @@ class SprintAgent(BaseAgent):
             ),
         )
 
+    @property
+    def _run_label(self) -> str:
+        """Labels every issue from this run, so "show me what THIS workflow created" is one JQL."""
+        return f"sdlc-run-{self.ctx.run_id[:8]}"
+
     def _to_jira_issues(self, plan: dict, stories: dict) -> list[dict]:
         by_id = {s["id"]: s for s in stories.get("stories", [])}
         sprint_of = {
@@ -121,7 +127,7 @@ class SprintAgent(BaseAgent):
                 "local_id": ep["id"], "type": "Epic",
                 "summary": f"{ep['id']} {ep['name']}",
                 "description": ep.get("goal", ""),
-                "labels": ["epic"],
+                "labels": ["epic", self._run_label],
             })
             for feat in ep.get("features", []):
                 for sid in feat.get("story_ids", []):
@@ -140,6 +146,7 @@ class SprintAgent(BaseAgent):
                             f"Traces to: {', '.join(st.get('requirement_ids', []))}"
                         ),
                         "story_points": st.get("story_points"),
-                        "labels": [f"sprint-{sprint_of.get(sid, 'backlog')}", *st.get("requirement_ids", [])],
+                        "labels": [f"sprint-{sprint_of.get(sid, 'backlog')}", self._run_label,
+                                   *st.get("requirement_ids", [])],
                     })
         return issues

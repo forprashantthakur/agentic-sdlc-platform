@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from sqlalchemy.orm import Session
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.adapters import registry
 from app.adapters.figma_mcp import TOOL_CANDIDATES, FigmaMCPAdapter
+from urllib.parse import quote
+
 from app.core.config import settings
+from app.core.db import get_session
 from app.llm.gemini import gemini
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
@@ -485,3 +490,52 @@ def jira_probe(create_test_issue: bool = False, cleanup: bool = True):
                       if out.get("ok") else
                       "Something is not right; see the failed checks above.")
     return out
+
+
+@router.get("/jira/backlog")
+def jira_backlog(project_id: str, db: Session = Depends(get_session)):
+    """What this project actually created in Jira, with links to open it there.
+
+    Reads the sprint plan rather than calling Jira: the issues were recorded when they were created,
+    so this answers instantly and still works if Jira is unreachable — and it shows the mock's
+    issues too, so the panel is not blank during an offline demo.
+    """
+    from sqlalchemy import select as _select
+
+    from app.models import Artifact, ArtifactType, ArtifactVersion, Project
+
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    art = db.scalar(_select(Artifact).where(
+        Artifact.project_id == project_id, Artifact.type == ArtifactType.SPRINT_PLAN))
+    if not art:
+        return {"issues": [], "ready": False,
+                "message": "No sprint plan yet — run the pipeline through both gates."}
+    v = db.scalar(_select(ArtifactVersion).where(
+        ArtifactVersion.artifact_id == art.id).order_by(ArtifactVersion.version.desc()))
+    plan = (v.payload if v else {}) or {}
+
+    issues = plan.get("jira", []) or []
+    key = plan.get("jira_project_key") or settings.jira_project_key
+    label = plan.get("jira_run_label")
+    live = not settings.is_mocked("jira") and bool(settings.jira_base_url)
+    base = settings.jira_base_url.rstrip("/") if live else "https://hdfcbank.atlassian.net"
+
+    return {
+        "ready": bool(issues),
+        "live": live,
+        "project_key": key,
+        "error": plan.get("jira_error"),
+        "counts": {
+            "total": len(issues),
+            "epics": sum(1 for i in issues if i.get("type") == "Epic"),
+            "stories": sum(1 for i in issues if i.get("type") not in ("Epic", None)),
+        },
+        # Deep links: the board, and a JQL that isolates exactly this run's issues.
+        "board_url": f"{base}/jira/software/projects/{key}/boards/1",
+        "run_url": (f"{base}/issues/?jql=" + quote(f'project = {key} AND labels = "{label}" ORDER BY created ASC')
+                    ) if label else f"{base}/browse/{key}",
+        "issues": issues,
+    }

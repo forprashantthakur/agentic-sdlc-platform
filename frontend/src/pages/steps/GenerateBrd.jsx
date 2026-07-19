@@ -1,4 +1,4 @@
-import { Download, FileCheck2, FileText, GitCompare, Loader2, Rocket, Send } from 'lucide-react'
+import { Download, FileCheck2, FileText, FolderKanban, GitCompare, Loader2, Rocket, Send } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -23,6 +23,7 @@ export default function GenerateBrd({ project, onBack }) {
   const [diff, setDiff] = useState(null)
   const [showDiff, setShowDiff] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [jira, setJira] = useState(null)
 
   const open = async (a, vid) => {
     setActive(a)
@@ -43,6 +44,9 @@ export default function GenerateBrd({ project, onBack }) {
   }, [project])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (project) api.get(`/api/integrations/jira/backlog?project_id=${project.id}`).then(setJira).catch(() => {})
+  }, [project?.id])
 
   const notWired = (what) =>
     toast(`${what} — preview only`, {
@@ -82,6 +86,59 @@ export default function GenerateBrd({ project, onBack }) {
           </Button>
         </div>
       </div>
+
+      {jira?.ready && (
+        <Card>
+          <CardHeader>
+            <FolderKanban className="h-4 w-4 text-brand" />
+            <CardTitle>Delivered to Jira — project {jira.project_key}</CardTitle>
+            <Badge tone={jira.live ? 'success' : 'warning'} className="ml-auto">
+              {jira.live ? 'LIVE' : 'MOCK'}
+            </Badge>
+          </CardHeader>
+          <CardBody>
+            <p className="text-[12.5px] text-muted">
+              {jira.counts.epics} epic · {jira.counts.stories} user stories created from the approved
+              requirements{jira.live ? '' : ' (mock — set JIRA_MOCK=false to write to a real Jira)'}.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a href={jira.run_url} target="_blank" rel="noreferrer">
+                <Button><FolderKanban className="h-3.5 w-3.5" /> Open these stories in Jira</Button>
+              </a>
+              <a href={jira.board_url} target="_blank" rel="noreferrer">
+                <Button variant="secondary">Open the {jira.project_key} board</Button>
+              </a>
+            </div>
+            <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-line">
+              <table className="w-full text-[12px]">
+                <thead className="sticky top-0 bg-bg">
+                  <tr className="text-left text-[10.5px] uppercase tracking-wider text-muted">
+                    <th className="px-3 py-2 font-semibold">Key</th>
+                    <th className="px-3 py-2 font-semibold">Type</th>
+                    <th className="px-3 py-2 font-semibold">Summary</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {jira.issues.map((i) => (
+                    <tr key={i.key}>
+                      <td className="px-3 py-1.5 font-mono">
+                        <a href={i.url} target="_blank" rel="noreferrer" className="font-semibold text-brand hover:underline">{i.key}</a>
+                      </td>
+                      <td className="px-3 py-1.5 text-muted">{i.type}</td>
+                      <td className="px-3 py-1.5">{i.summary}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+      {jira && !jira.ready && jira.error && (
+        <div className="rounded-xl border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-[12px] text-danger">
+          Jira did not receive this backlog — {jira.error}
+        </div>
+      )}
 
       {[['Phase 1 · Requirement Documentation', artifacts.filter((a) => !PHASE2.has(a.type))],
         ['Phase 2 · Sprint Delivery (Agents 7-11)', artifacts.filter((a) => PHASE2.has(a.type))]]
