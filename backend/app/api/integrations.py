@@ -343,10 +343,20 @@ def jira_probe(create_test_issue: bool = False, cleanup: bool = True):
     """
     import httpx
 
+    # What the server can actually see. Booleans only — a diagnostic must never echo a secret.
+    seen = {
+        "JIRA_MOCK": settings.jira_mock,
+        "JIRA_BASE_URL": settings.jira_base_url or "(not set)",
+        "JIRA_EMAIL": settings.jira_email or "(not set)",
+        "JIRA_TOKEN": "set" if settings.jira_token else "(not set)",
+        "JIRA_PROJECT_KEY": settings.jira_project_key or "(not set)",
+        "MOCK_MODE": settings.mock_mode,
+    }
     out: dict[str, Any] = {
         "mode": "mock",
         "reason": "",
         "project_key": settings.jira_project_key,
+        "settings_seen": seen,
         "checks": [],
     }
 
@@ -355,9 +365,13 @@ def jira_probe(create_test_issue: bool = False, cleanup: bool = True):
 
     # ── configuration ────────────────────────────────────────────────────────
     if settings.is_mocked("jira"):
-        out["reason"] = ("Jira is mocked. Set JIRA_MOCK=false (plus credentials) to write for real — "
-                         "MOCK_MODE=true mocks every service unless a service overrides it.")
+        why = ("JIRA_MOCK is not set to false" if settings.jira_mock is not False
+               else "MOCK_MODE=true and JIRA_MOCK did not override it")
+        out["reason"] = (f"Jira is mocked ({why}). Set JIRA_MOCK=false on the backend, plus "
+                         "JIRA_BASE_URL / JIRA_EMAIL / JIRA_TOKEN / JIRA_PROJECT_KEY, then redeploy.")
         check("Configuration", False, out["reason"])
+        check("Settings the server can see", False,
+              " · ".join(f"{k}={v}" for k, v in seen.items()))
         return out
     if not (settings.jira_token and settings.jira_base_url):
         out["reason"] = "JIRA_BASE_URL and JIRA_TOKEN are required."
