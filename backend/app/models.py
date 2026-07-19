@@ -173,6 +173,27 @@ class Run(Base):
     events: Mapped[list[RunEvent]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
+class OutboundEmail(Base):
+    """Every approval email the platform triggered.
+
+    In memory this was lost on every restart — and Render restarts on each deploy and after idle —
+    so the Approval Outbox would be empty while a gate sat waiting, with no way to reach the email.
+    Approvals live in the database; their emails should too.
+    """
+
+    __tablename__ = "outbound_emails"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    message_id: Mapped[str] = mapped_column(String(64), index=True)
+    thread_id: Mapped[str] = mapped_column(String(64), default="")
+    to_addrs: Mapped[list] = mapped_column(JSON, default=list)
+    subject: Mapped[str] = mapped_column(Text, default="")
+    html: Mapped[str] = mapped_column(Text, default="")
+    delivery: Mapped[str] = mapped_column(String(20), default="mock")   # mock | smtp | gmail
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class RunEvent(Base):
     """Append-only audit trail. RBI/IT-governance auditors read this table."""
 

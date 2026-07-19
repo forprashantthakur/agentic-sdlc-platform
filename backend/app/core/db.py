@@ -9,7 +9,11 @@ from app.models import Base
 
 connect_args = {}
 if settings.db_url.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
+    # timeout: SQLite locks the whole database on write, and agents run in background threads, so a
+    # concurrent write (e.g. recording an outbound email while an agent's transaction is open) fails
+    # instantly with "database is locked". Waiting briefly makes SQLite behave enough like Postgres
+    # for local runs and tests to be trustworthy. Postgres needs none of this (MVCC).
+    connect_args = {"check_same_thread": False, "timeout": 30}
 
 engine = create_engine(
     settings.db_url, pool_pre_ping=True, future=True, connect_args=connect_args
