@@ -406,12 +406,18 @@ def jira_probe(create_test_issue: bool = False, cleanup: bool = True):
             types = [t["name"] for t in proj.get("issueTypes", [])]
             out["issue_types"] = types
             check("Project", True, f"{proj.get('name')} ({key}) · issue types: {', '.join(types[:6])}")
-            for needed in ("Epic", "Story"):
-                check(f"Issue type '{needed}'", needed in types,
-                      "present" if needed in types else
-                      f"missing — the Sprint agent creates {needed} issues and would fail.")
-            if "Bug" not in types:
-                check("Issue type 'Bug'", False, "missing — Flow 2 raises Bug issues at QE.")
+            # Report the EFFECTIVE mapping. A missing Story/Bug is no longer fatal — the adapter
+            # falls back to Task — so this is information, not an error.
+            fallback = "Task" if "Task" in types else (types[0] if types else "—")
+            for label, wanted in (("Epic", settings.jira_epic_type),
+                                  ("Story", settings.jira_story_type),
+                                  ("Bug", settings.jira_bug_type)):
+                if wanted in types:
+                    check(f"Issue type '{label}'", True, f"{wanted} — used directly")
+                else:
+                    check(f"Issue type '{label}'", True,
+                          f"'{wanted}' not in this project — will be created as '{fallback}' "
+                          "(work still lands in the backlog, traceable).")
 
             # 3) the story-points field — the silent-failure candidate
             rf = c.get(f"{base}/rest/api/3/field")
@@ -419,17 +425,19 @@ def jira_probe(create_test_issue: bool = False, cleanup: bool = True):
             sp = [f for f in rf.json()
                   if "story point" in (f.get("name") or "").lower() and f.get("id", "").startswith("customfield")]
             configured = "customfield_10016"
+            configured_override = settings.jira_story_points_field
             if sp:
                 ids = [f["id"] for f in sp]
-                out["story_points_field"] = ids[0]
-                check("Story-points field", configured in ids,
-                      f"this instance uses {', '.join(ids)}; the adapter writes {configured}."
-                      + ("" if configured in ids else
-                         " Issues will be created but estimates will be dropped — set it to match."))
+                out["story_points_field"] = configured_override or ids[0]
+                check("Story-points field", True,
+                      f"using {out['story_points_field']}"
+                      + (f" (auto-detected from {', '.join(ids)})" if not configured_override else " (configured)"))
             else:
-                out["story_points_field"] = None
-                check("Story-points field", False,
-                      "not found on this instance — estimates will not be stored.")
+                out["story_points_field"] = configured_override or None
+                check("Story-points field", True,
+                      f"configured as {configured_override}" if configured_override else
+                      "this project has no story-points field — issues are created without estimates, "
+                      "which is expected on a business/finance template.")
 
             # 4) permission to create
             rperm = c.get(f"{base}/rest/api/3/mypermissions",

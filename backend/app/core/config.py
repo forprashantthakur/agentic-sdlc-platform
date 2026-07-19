@@ -146,6 +146,14 @@ class Settings(BaseSettings):
     jira_email: str = ""
     jira_token: str = ""
     jira_project_key: str = "HDFC"
+    # Issue-type names and the story-points field vary by Jira project template and by instance.
+    # A business/finance project has no Story or Bug at all, so the adapter falls back to Task
+    # rather than failing the run — see JiraAdapter._resolve_type.
+    jira_epic_type: str = "Epic"
+    jira_story_type: str = "Story"
+    jira_bug_type: str = "Bug"
+    jira_test_type: str = "Task"
+    jira_story_points_field: str = ""      # blank = auto-detect, else e.g. customfield_10016
 
     jwt_secret: str = "change-me-in-prod"
     approval_token_ttl_hours: int = 72

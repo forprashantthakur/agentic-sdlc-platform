@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from app.core.config import settings
 from app.core.logging import log
 
 
@@ -19,6 +20,62 @@ class JiraAdapter:
     def __init__(self, base_url: str, email: str, token: str) -> None:
         self.base = base_url.rstrip("/")
         self.auth = (email, token)
+        self._types: list[str] | None = None      # the project's real issue types
+        self._sp_field: str | None = None         # the project's real story-points field
+
+    # ── instance introspection ────────────────────────────────────────────────
+    def _project_types(self, project_key: str) -> list[str]:
+        """The issue types this project actually has.
+
+        Jira templates differ wildly: a business/finance project has Epic, Task, Subtask,
+        Allocation, Expense Request — and no Story or Bug at all. Asking for a type the project
+        does not define is a 400 that would fail the whole run, so we look first.
+        """
+        if self._types is not None:
+            return self._types
+        try:
+            with httpx.Client(timeout=20, auth=self.auth) as c:
+                r = c.get(f"{self.base}/rest/api/3/project/{project_key}")
+                r.raise_for_status()
+                self._types = [t["name"] for t in r.json().get("issueTypes", [])]
+        except Exception as e:
+            log.warning("jira.types_lookup_failed", error=str(e))
+            self._types = []
+        return self._types
+
+    def _resolve_type(self, wanted: str, project_key: str) -> str:
+        """Map a wanted type onto one the project has, falling back to Task.
+
+        Creating a Task named "As a treasurer, I want…" is a lesser evil than failing the run:
+        the work still lands in the backlog, traceable, and the summary carries the story text.
+        """
+        types = self._project_types(project_key)
+        if not types or wanted in types:
+            return wanted
+        for alt in ("Task", "Story", types[0]):
+            if alt in types:
+                log.info("jira.type_fallback", wanted=wanted, used=alt)
+                return alt
+        return wanted
+
+    def _story_points_field(self) -> str | None:
+        """Configured field, else auto-detected, else None (estimates simply are not written)."""
+        if settings.jira_story_points_field:
+            return settings.jira_story_points_field
+        if self._sp_field is not None:
+            return self._sp_field or None
+        try:
+            with httpx.Client(timeout=20, auth=self.auth) as c:
+                r = c.get(f"{self.base}/rest/api/3/field")
+                r.raise_for_status()
+                match = next((f["id"] for f in r.json()
+                              if "story point" in (f.get("name") or "").lower()
+                              and str(f.get("id", "")).startswith("customfield")), "")
+                self._sp_field = match
+        except Exception as e:
+            log.warning("jira.field_lookup_failed", error=str(e))
+            self._sp_field = ""
+        return self._sp_field or None
 
     def create_issues(self, *, project_key, issues) -> list[dict[str, Any]]:
         created: list[dict[str, Any]] = []
@@ -29,13 +86,15 @@ class JiraAdapter:
             fields: dict[str, Any] = {
                 "project": {"key": project_key},
                 "summary": issue["summary"],
-                "issuetype": {"name": issue["type"]},
+                "issuetype": {"name": self._resolve_type(issue["type"], project_key)},
                 "description": _adf(issue.get("description", "")),
                 "labels": ["agentic-sdlc", *issue.get("labels", [])],
             }
             if issue["type"] == "Story":
-                if sp := issue.get("story_points"):
-                    fields["customfield_10016"] = sp  # story points field id varies by instance
+                # Only write points if this instance actually has the field; otherwise Jira 400s
+                # on an unknown field and the whole issue is lost for the sake of an estimate.
+                if (sp := issue.get("story_points")) and (spf := self._story_points_field()):
+                    fields[spf] = sp
                 if parent_local := issue.get("parent_local_id"):
                     if pk := key_by_local.get(parent_local):
                         fields["parent"] = {"key": pk}
