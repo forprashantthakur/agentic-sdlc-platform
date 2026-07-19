@@ -75,22 +75,42 @@ class SprintAgent(BaseAgent):
         plan.setdefault("velocity_assumption", self.velocity)
 
         issues = self._to_jira_issues(plan, stories)
+        tracker = registry.tracker()
+
+        # Try the project resolved for THIS requirement, then the configured fallback. A wrong key
+        # (stale, deleted, or not writable by this account) should cost a retry, not the backlog —
+        # and the plan records exactly which keys were tried so a failure is diagnosable.
         pkey = resolve_project_key(self.ctx.db, self.ctx.db.get(Project, self.ctx.project_id))
+        attempts = [pkey]
+        if settings.jira_project_key and settings.jira_project_key != pkey:
+            attempts.append(settings.jira_project_key)
+
+        created: list[dict] = []
+        last_error: Exception | None = None
         plan["jira_project_key"] = pkey
-        try:
-            created = registry.tracker().create_issues(project_key=pkey, issues=issues)
-            plan["jira"] = created
-            plan["jira_run_label"] = self._run_label
-            progress.emit(f"Jira: {len(created)} issue(s) created in project {pkey}.")
-        except Exception as e:  # a Jira outage must not lose the plan
-            # ...but it must not be SILENT either. A swallowed integration error leaves the user
-            # staring at an empty board with nothing to explain it.
-            log.error("jira.failed", error=str(e))
+
+        for key in attempts:
+            try:
+                created = tracker.create_issues(project_key=key, issues=issues)
+                plan["jira"] = created
+                plan["jira_project_key"] = key
+                plan["jira_run_label"] = self._run_label
+                plan.pop("jira_error", None)
+                pkey, last_error = key, None
+                progress.emit(f"Jira: {len(created)} issue(s) created in project {key}.")
+                break
+            except Exception as e:
+                last_error = e
+                log.error("jira.failed", project=key, error=str(e))
+                progress.emit(f"Jira: project {key} rejected the issues — {str(e)[:220]}",
+                              level="warning")
+
+        if last_error is not None:
             plan["jira"] = []
-            plan["jira_error"] = str(e)
+            plan["jira_error"] = f"tried project(s) {', '.join(attempts)} — {last_error}"
             created = []
-            progress.emit(f"Jira: FAILED to create issues in project {pkey} — {str(e)[:300]}",
-                          level="error")
+            progress.emit(
+                f"Jira: FAILED in {', '.join(attempts)} — {str(last_error)[:260]}", level="error")
 
         v = self.commit(
             ArtifactType.SPRINT_PLAN, plan,

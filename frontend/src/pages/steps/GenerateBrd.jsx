@@ -136,7 +136,12 @@ export default function GenerateBrd({ project, onBack }) {
       )}
       {jira && !jira.ready && jira.error && (
         <div className="rounded-xl border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-[12px] text-danger">
-          Jira did not receive this backlog — {jira.error}
+          <p className="font-semibold">Jira did not receive this backlog (target project: {jira.project_key || 'unknown'})</p>
+          <p className="mt-1">{jira.error}</p>
+          <p className="mt-1.5 text-[11px] opacity-80">
+            If that project key is not one you created, set JIRA_PROJECT_KEY on the backend, or turn
+            on JIRA_AUTO_CREATE_PROJECT so the agent provisions it.
+          </p>
         </div>
       )}
 
