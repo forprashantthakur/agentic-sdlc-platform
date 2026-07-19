@@ -105,7 +105,7 @@ export default function BusinessContext({ project, onCreated, onNext }) {
           </p>
         </div>
         <div className="text-right shrink-0 ml-6">
-          <div className="text-[11px] text-muted mb-1">Completeness</div>
+          <div className="text-[11px] text-muted mb-1" title="How much of this intake form is filled in. It scores the brief, not the project's progress.">Brief completeness</div>
           <div className="flex items-center gap-2">
             <div className="h-1.5 w-24 rounded-full bg-line overflow-hidden">
               <div className={`h-full rounded-full transition-all ${completeness >= 70 ? 'bg-success' : 'bg-warning'}`}

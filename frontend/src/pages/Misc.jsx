@@ -53,7 +53,14 @@ export function Projects({ setProject, onSeed }) {
         <div className="grid gap-4 md:grid-cols-2">
           {filtered.map((p) => (
             <Card key={p.id} hover className="group cursor-pointer relative"
-              onClick={() => { setProject(p); nav('/new') }}>
+              onClick={() => {
+                setProject(p)
+                // A documented project should not open on the empty intake form. Land where the
+                // work actually is.
+                nav('/new', p.artifact_count > 0
+                  ? { state: { step: 'generate', completed: ['context', 'ingestion', 'discovery', 'analysis', 'review'] } }
+                  : undefined)
+              }}>
               <CardBody>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -256,7 +263,10 @@ export function ReviewCenter({ setProject }) {
                   <div className="text-[13px] font-semibold">{titleCase(a.gate)} · round {a.round}</div>
                   <div className="text-[11.5px] text-muted">{a.approver_email} · raised {fmtDateTime(a.created_at)}</div>
                 </div>
-                <Button onClick={async () => { setProject(await api.project(a.project_id)); nav('/new') }}>Open</Button>
+                <Button onClick={async () => {
+                  setProject(await api.project(a.project_id))
+                  nav('/new', { state: { step: 'review', completed: ['context', 'ingestion', 'discovery', 'analysis'] } })
+                }}>Open</Button>
               </CardBody>
             </Card>
           ))}
