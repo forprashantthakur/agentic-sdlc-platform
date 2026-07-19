@@ -28,7 +28,7 @@ export default function SprintDelivery() {
   const nav = useNavigate()
   const toast = useToast()
   const [projects, setProjects] = useState([])
-  const [approvers, setApprovers] = useState('po@hdfcbank.com, btg@hdfcbank.com')
+  const [approvers, setApprovers] = useState('po@hdfcbank.com')
   const [busy, setBusy] = useState('')
   const [run, setRun] = useState(null)
   const [events, setEvents] = useState([])
@@ -81,10 +81,19 @@ export default function SprintDelivery() {
   const decide = async (approval, decision) => {
     setDeciding(approval.id)
     try {
-      await api.decide(approval.id, { decision, comments: [] })
+      const r = await api.decide(approval.id, { decision, comments: [] })
       setPending((ps) => ps.filter((a) => a.id !== approval.id))
-      toast(decision === 'APPROVED' ? 'Approved — pipeline resuming' : 'Changes requested',
-            { tone: decision === 'APPROVED' ? 'success' : 'warning' })
+      if (r?.status === 'WAITING_FOR_OTHER_APPROVERS') {
+        // The single most confusing state in the product: the gate is holding for someone else.
+        toast('Recorded — gate still held', {
+          tone: 'warning',
+          detail: `This gate needs every approver. Still waiting on: ${(r.pending || []).join(', ')}.`,
+          duration: 7000,
+        })
+      } else {
+        toast(decision === 'APPROVED' ? 'Approved — pipeline resuming' : 'Changes requested',
+              { tone: decision === 'APPROVED' ? 'success' : 'warning' })
+      }
     } catch (e) {
       toast('Could not record the decision', { detail: e.message, tone: 'error' })
     } finally {
@@ -141,8 +150,12 @@ export default function SprintDelivery() {
           </CardHeader>
           <CardBody className="space-y-3">
             <div>
-              <Label>Approvers (BTG · Tech Lead · PO — comma-separated)</Label>
+              <Label>Approvers (comma-separated)</Label>
               <Input value={approvers} onChange={(e) => setApprovers(e.target.value)} />
+              <p className="mt-1 text-[11px] text-muted">
+                Every address listed must sign off before a gate opens — two approvers means two
+                approvals per gate. Use one for a fast demo.
+              </p>
             </div>
             <div className="space-y-2">
               {projects.length === 0 ? (
@@ -203,6 +216,11 @@ export default function SprintDelivery() {
                 })}
                 {run.status === 'WAITING_APPROVAL' && (
                   <div className="mt-3 space-y-2">
+                    {pending.length > 1 && (
+                      <div className="rounded-lg bg-warning/10 px-3 py-2 text-[11.5px] font-semibold text-warning">
+                        This gate needs {pending.length} approvals — it opens only when all are given.
+                      </div>
+                    )}
                     {pending.length === 0 ? (
                       <div className="rounded-lg bg-warning/10 px-3 py-2.5 text-[12px] text-warning">
                         Awaiting an approval — loading the pending gate…
