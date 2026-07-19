@@ -91,10 +91,20 @@ export default function Approve() {
           {isApprove ? 'Approved' : 'Changes requested'}
         </p>
         <p style={{ fontSize: 13.5, color: '#63666A', marginTop: 8, lineHeight: 1.5 }}>
-          {resumed && isApprove && 'Your approval is recorded and the pipeline has resumed. You can close this tab.'}
+          {resumed && isApprove && 'Your approval is recorded and the pipeline has resumed.'}
           {resumed && !isApprove && 'Recorded. The agent will revise the artifact against your comments and come back for another look.'}
           {waiting && 'Recorded. This gate has more than one approver — it will proceed once the others decide.'}
-          {!resumed && !waiting && 'Your decision has been recorded. You can close this tab.'}
+          {!resumed && !waiting && 'Your decision has been recorded.'}
+        </p>
+        {/* Do not strand the user here. This page sits outside the app shell, so without a way back
+            the workflow appears lost and people restart it from scratch. */}
+        <a href="/" style={{ display: 'inline-block', marginTop: 18, padding: '11px 20px', borderRadius: 8,
+                             background: '#004C8F', color: '#fff', fontWeight: 600, fontSize: 14,
+                             textDecoration: 'none' }}>
+          Continue in the platform →
+        </a>
+        <p style={{ fontSize: 11.5, color: '#9AA3AB', marginTop: 10 }}>
+          Your in-progress work is shown in the “In progress” bar at the top of the app.
         </p>
       </div>
     )

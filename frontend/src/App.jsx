@@ -13,8 +13,22 @@ import SprintDelivery from './pages/SprintDelivery'
 import NewBrd from './pages/NewBrd'
 import { Agents, Documents, Integrations, Knowledge, Projects, ReviewCenter, Settings } from './pages/Misc'
 
+// The selected project is the workflow's anchor. Keeping it only in React state meant any
+// navigation — above all the standalone /approve page — dropped it, and the user had to start over.
+const PROJECT_KEY = 'sdlc.activeProject'
+const loadProject = () => {
+  try { return JSON.parse(localStorage.getItem(PROJECT_KEY) || 'null') } catch { return null }
+}
+
 function Shell() {
-  const [project, setProject] = useState(null)
+  const [project, setProjectState] = useState(loadProject)
+  const setProject = (p) => {
+    setProjectState(p)
+    try {
+      if (p) localStorage.setItem(PROJECT_KEY, JSON.stringify({ id: p.id, name: p.name, business_unit: p.business_unit }))
+      else localStorage.removeItem(PROJECT_KEY)
+    } catch { /* private mode */ }
+  }
   const [run, setRun] = useState(null)
   const [health, setHealth] = useState(null)
   const [pending, setPending] = useState(0)

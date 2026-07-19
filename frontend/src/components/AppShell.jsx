@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '../lib/utils'
 import { Badge, Tooltip } from './ui'
+import ActiveWork from './ActiveWork'
 import Copilot from './Copilot'
 import BrandLogo from './BrandLogo'
 
@@ -166,6 +167,8 @@ export default function AppShell({ children, pending = 0, intakeCount = 0, proje
             </Tooltip>
           </div>
         </header>
+
+        <ActiveWork />
 
         <div className="flex-1 flex min-w-0">
           <main className="flex-1 min-w-0 overflow-x-hidden">
