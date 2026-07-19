@@ -47,16 +47,27 @@ DECISION = re.compile(r"^\s*\d*\s*(DECISION|AGREED|RESOLVED)\s*[:\-]", re.I)
 
 # The language of an unresolved argument. Our seed corpora are full of it, and so is real discovery.
 CONFLICT_MARK = re.compile(
-    r"\b(UNRESOLVED|disagreed|pushed back|I am not convinced|I do not agree|too low|too high|"
+    # The language of two sources disagreeing. Extended beyond the original seed corpus' exact
+    # phrasing: a detector tuned to the documents it was written against proves nothing, and real
+    # uploaded evidence contradicts itself in ordinary business English.
+    r"\b(UNRESOLVED|disagreed?|pushed back|I am not convinced|I do not agree|too low|too high|"
     r"rejected it|I will not sign|the answer is no|I think that is|but I have thought about it|"
-    r"having looked at|I know I pushed back)\b", re.I,
+    r"having looked at|I know I pushed back|"
+    r"has since come back|that has changed|was the position before|please do not|do not implement|"
+    r"overrides?|supersedes?|not negotiable|is now capped|instead of the|rather than the|"
+    r"correction|we cannot|must never)\b", re.I,
 )
 # The language of something nobody thought about.
 GAP_MARK = re.compile(
-    r"\b(nobody (has )?(mentioned|asked|discussed|designed|answered)|we have not (decided|talked|discussed)|"
+    # The language of something nobody thought about — again broadened past the original corpus.
+    r"\b(nobody (has )?(mentioned|asked|discussed|designed|answered|could say|agreed|defined|"
+    r"stated|specified|knew)|no one (defined|agreed|stated|could say)|"
+    r"we have not (decided|talked|discussed)|"
     r"I do not have (a good answer|that number)|there isn'?t one|has not been (decided|designed)|"
     r"needs a plan|write (that|it) down|park it|somebody needs to|that needs to be in the requirements|"
-    r"I did not know that|no SLA|it is not small|is unspecified|not been decided)\b", re.I,
+    r"I did not know that|no SLA|it is not small|is unspecified|not been decided|"
+    r"raised and not resolved|left unresolved|remains open|to be confirmed|was never resolved)\b",
+    re.I,
 )
 COMPLIANCE = re.compile(
     r"\b(RBI|FEMA|PMLA|KYC|AML|DPDP|PCI|SEBI|IRDAI|regulat|complian|audit|circular|statutory|"

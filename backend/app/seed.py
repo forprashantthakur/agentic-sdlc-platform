@@ -702,6 +702,11 @@ CATALOG: dict[str, dict[str, Any]] = {
     },
 }
 
+# Five further demo projects live in seed_extra so this file stays readable.
+from app.seed_extra import EXTRA_CATALOG  # noqa: E402
+
+CATALOG.update(EXTRA_CATALOG)
+
 # Backwards compatibility: the original POST /api/projects/seed seeded this one.
 SEED_SOURCES = [
     {"kind": k, "title": t, "content": c} for k, t, c in CATALOG["upi_autopay"]["sources"]
