@@ -385,38 +385,59 @@ def discovery_sample(project_id: str, db: Session = Depends(get_session)):
 
 @router.get("/cleanup/preview")
 def cleanup_preview(db: Session = Depends(get_session)):
-    """What a cleanup WOULD delete. Never deletes anything.
+    """What each cleanup mode WOULD delete. Never deletes anything.
 
-    Scoped deliberately to projects that produced no artifacts: an empty project is a false start,
-    while one with a document pack is somebody's work. Bulk-deleting the latter on a single click
-    is not a feature, it is an incident.
+    Two modes, because "tidy up" means different things:
+      empty      — produced no artifacts at all (false starts, seeded-but-never-run)
+      unfinished — anything not COMPLETED, even if it produced some artifacts along the way
+    A completed project is somebody's finished work and is never in scope for either.
     """
     from app.models import Artifact
 
     rows = db.scalars(select(Project).order_by(Project.created_at.desc())).all()
-    empty = []
+    empty, unfinished = [], []
     for p in rows:
         n = db.scalar(select(func.count()).select_from(Artifact).where(Artifact.project_id == p.id)) or 0
+        st = _status(db, p)
+        item = {"id": p.id, "name": p.name, "status": st, "artifacts": n,
+                "created_at": p.created_at.isoformat()}
         if n == 0:
-            empty.append({"id": p.id, "name": p.name, "created_at": p.created_at.isoformat()})
-    return {"total_projects": len(rows), "deletable": len(empty),
-            "kept": len(rows) - len(empty), "projects": empty[:200]}
+            empty.append(item)
+        if st != "COMPLETED":
+            unfinished.append(item)
+    return {
+        "total_projects": len(rows),
+        "empty": len(empty),
+        "unfinished": len(unfinished),
+        "completed": sum(1 for p in rows if _status(db, p) == "COMPLETED"),
+        "sample": unfinished[:50],
+    }
 
 
 @router.post("/cleanup")
-def cleanup(confirm: str = "", db: Session = Depends(get_session)):
-    """Delete every project that produced no artifacts. Requires ?confirm=DELETE-EMPTY."""
+def cleanup(mode: str = "empty", confirm: str = "", db: Session = Depends(get_session)):
+    """Delete projects in bulk. mode=empty|unfinished. Requires ?confirm=DELETE.
+
+    A completed project is never deleted by either mode — losing finished work to a bulk action is
+    the kind of mistake you cannot apologise your way out of.
+    """
     from app.models import Artifact
 
-    if confirm != "DELETE-EMPTY":
-        raise HTTPException(400, "Pass ?confirm=DELETE-EMPTY to proceed.")
+    if confirm != "DELETE":
+        raise HTTPException(400, "Pass ?confirm=DELETE to proceed.")
+    if mode not in ("empty", "unfinished"):
+        raise HTTPException(400, "mode must be 'empty' or 'unfinished'.")
 
-    rows = db.scalars(select(Project)).all()
     deleted = 0
-    for p in rows:
-        n = db.scalar(select(func.count()).select_from(Artifact).where(Artifact.project_id == p.id)) or 0
-        if n == 0:
-            db.delete(p)          # cascades to sources, runs and events
-            deleted += 1
+    for p in db.scalars(select(Project)).all():
+        st = _status(db, p)
+        if st == "COMPLETED":
+            continue
+        if mode == "empty":
+            n = db.scalar(select(func.count()).select_from(Artifact).where(Artifact.project_id == p.id)) or 0
+            if n:
+                continue
+        db.delete(p)          # cascades to sources, runs, events and artifacts
+        deleted += 1
     db.commit()
-    return {"deleted": deleted}
+    return {"deleted": deleted, "mode": mode}

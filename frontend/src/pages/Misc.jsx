@@ -14,13 +14,20 @@ const STATUS_TONE = {
 
 export function Projects({ setProject, onSeed }) {
   const [cleanup, setCleanup] = useState(null)
-  const [cleaning, setCleaning] = useState(false)
+  const [cleaning, setCleaning] = useState('')
   const nav = useNavigate()
   const toast = useToast()
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
   const [doomed, setDoomed] = useState(null)   // the project pending deletion
   const load = useCallback(() => { api.projects().then(setRows).catch(() => setRows([])) }, [])
+  const runCleanup = async (mode) => {
+    setCleaning(mode)
+    const r = await api.cleanupRun(mode).catch(() => null)
+    setCleaning('')
+    setCleanup(null)
+    if (r) { toast(`Deleted ${r.deleted} project(s)`, { tone: 'success' }); load() }
+  }
   useEffect(() => { load() }, [load])
   if (!rows) return <Skeleton className="h-64" />
 
@@ -47,29 +54,35 @@ export function Projects({ setProject, onSeed }) {
 
       {cleanup && (
         <Card>
-          <CardBody className="space-y-2">
+          <CardBody className="space-y-3">
             <p className="text-[13px] font-semibold">
-              {cleanup.deletable} of {cleanup.total_projects} projects produced no documents.
+              {cleanup.total_projects} projects · {cleanup.completed} completed · {cleanup.unfinished} not finished
             </p>
-            <p className="text-[12px] text-muted">
-              Deleting these removes false starts only. The {cleanup.kept} projects that produced a
-              document pack are kept — bulk-deleting somebody's work on one click is not a feature.
-            </p>
-            <div className="flex gap-2 pt-1">
-              <Button
-                onClick={async () => {
-                  setCleaning(true)
-                  const r = await api.cleanupEmpty().catch(() => null)
-                  setCleaning(false)
-                  setCleanup(null)
-                  if (r) { toast(`Deleted ${r.deleted} empty project(s)`, { tone: 'success' }); load() }
-                }}
-                loading={cleaning}
-              >
-                Delete {cleanup.deletable} empty project(s)
-              </Button>
-              <Button variant="secondary" onClick={() => setCleanup(null)}>Cancel</Button>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-line p-3">
+                <div>
+                  <p className="text-[12.5px] font-semibold">Remove false starts</p>
+                  <p className="text-[11.5px] text-muted">
+                    {cleanup.empty} project(s) that produced no artifacts — seeded or started, never run.
+                  </p>
+                </div>
+                <Button variant="secondary" disabled={!cleanup.empty} loading={cleaning === 'empty'}
+                  onClick={() => runCleanup('empty')}>Delete {cleanup.empty}</Button>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
+                <div>
+                  <p className="text-[12.5px] font-semibold">Remove everything unfinished</p>
+                  <p className="text-[11.5px] text-muted">
+                    {cleanup.unfinished} project(s) that are draft, awaiting approval, in progress,
+                    failed or rejected — including any part-built artifacts. The {cleanup.completed}{' '}
+                    completed project(s) are kept.
+                  </p>
+                </div>
+                <Button disabled={!cleanup.unfinished} loading={cleaning === 'unfinished'}
+                  onClick={() => runCleanup('unfinished')}>Delete {cleanup.unfinished}</Button>
+              </div>
             </div>
+            <Button variant="ghost" onClick={() => setCleanup(null)}>Cancel</Button>
           </CardBody>
         </Card>
       )}

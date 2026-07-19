@@ -53,7 +53,7 @@ export const api = {
   abandonRun: (id) => req(`/api/runs/${id}/abandon`, { method: 'POST' }),
   abandonStale: () => req('/api/runs/abandon-stale', { method: 'POST' }),
   cleanupPreview: () => req('/api/projects/cleanup/preview'),
-  cleanupEmpty: () => req('/api/projects/cleanup?confirm=DELETE-EMPTY', { method: 'POST' }),
+  cleanupRun: (mode) => req(`/api/projects/cleanup?mode=${mode}&confirm=DELETE`, { method: 'POST' }),
   runs: (pid) => req(`/api/runs${pid ? `?project_id=${pid}` : ''}`),
   events: (id, after = 0) => req(`/api/runs/${id}/events?after=${after}`),
 
