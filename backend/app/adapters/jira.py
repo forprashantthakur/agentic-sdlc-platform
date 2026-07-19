@@ -21,7 +21,7 @@ class JiraAdapter:
     def __init__(self, base_url: str, email: str, token: str) -> None:
         self.base = base_url.rstrip("/")
         self.auth = (email, token)
-        self._types: list[str] | None = None      # the project's real issue types
+        self._types: dict[str, list[str]] = {}   # issue types PER PROJECT KEY
         self._sp_field: str | None = None         # the project's real story-points field
 
     # ── instance introspection ────────────────────────────────────────────────
@@ -32,17 +32,24 @@ class JiraAdapter:
         Allocation, Expense Request — and no Story or Bug at all. Asking for a type the project
         does not define is a 400 that would fail the whole run, so we look first.
         """
-        if self._types is not None:
-            return self._types
+        # Keyed by project. A single shared cache meant a failed lookup for one project (say a
+        # derived key that does not exist) cached an empty list, and the fallback project then
+        # inherited "I know nothing" — so it sent the unmapped type and Jira rejected it. The first
+        # failure poisoned the retry.
+        if project_key in self._types:
+            return self._types[project_key]
+        found: list[str] = []
         try:
             with httpx.Client(timeout=20, auth=self.auth) as c:
                 r = c.get(f"{self.base}/rest/api/3/project/{project_key}")
                 r.raise_for_status()
-                self._types = [t["name"] for t in r.json().get("issueTypes", [])]
+                found = [t["name"] for t in r.json().get("issueTypes", [])]
         except Exception as e:
-            log.warning("jira.types_lookup_failed", error=str(e))
-            self._types = []
-        return self._types
+            log.warning("jira.types_lookup_failed", project=project_key, error=str(e))
+        # Only cache a real answer; an empty result may just mean that project does not exist.
+        if found:
+            self._types[project_key] = found
+        return found
 
     def _resolve_type(self, wanted: str, project_key: str) -> str:
         """Map a wanted type onto one the project has, falling back to Task.
@@ -127,10 +134,11 @@ class JiraAdapter:
 
         # Epics first, so stories can reference a real parent key.
         for issue in sorted(issues, key=lambda i: 0 if i["type"] == "Epic" else 1):
+            actual_type = self._resolve_type(issue["type"], project_key)
             fields: dict[str, Any] = {
                 "project": {"key": project_key},
                 "summary": issue["summary"],
-                "issuetype": {"name": self._resolve_type(issue["type"], project_key)},
+                "issuetype": {"name": actual_type},
                 "description": _adf(issue.get("description", "")),
                 "labels": ["agentic-sdlc", *issue.get("labels", [])],
             }
@@ -148,8 +156,10 @@ class JiraAdapter:
 
             key_by_local[issue["local_id"]] = data["key"]
             created.append({
+                # Report what Jira actually holds, not what we asked for. Calling a Task a "Story"
+                # in the UI would be a small lie that costs trust the moment someone clicks through.
                 "key": data["key"], "url": f"{self.base}/browse/{data['key']}",
-                "type": issue["type"], "summary": issue["summary"],
+                "type": actual_type, "requested_type": issue["type"], "summary": issue["summary"],
             })
         return created
 
@@ -184,6 +194,18 @@ class JiraAdapter:
         if r.status_code < 300:
             return r.json()
         detail = self._jira_error(r)
+
+        # An invalid issue type is recoverable: nearly every Jira project has Task. Retry as Task
+        # rather than losing the story over a type name.
+        if r.status_code == 400 and "issuetype" in detail.lower():
+            retry = {**fields, "issuetype": {"name": "Task"}}
+            rt = c.post(f"{self.base}/rest/api/3/issue", json={"fields": retry}, auth=self.auth)
+            if rt.status_code < 300:
+                log.info("jira.issuetype_fallback", used="Task", reason=detail[:160])
+                progress.emit(f"Jira: '{fields.get('issuetype', {}).get('name')}' is not valid here — "
+                              "created as Task instead.", level="warning")
+                return rt.json()
+            detail = f"{detail} | as Task: {self._jira_error(rt)}"
 
         # A 400 is usually one unsupported field, not a broken request. Retry once with the
         # optional ones removed rather than losing the story entirely — and say what was dropped.
