@@ -17,6 +17,7 @@ from app.agents.base import AgentResult, BaseAgent
 from app.agents.schemas import SPRINT_PLAN
 from app.core.config import settings
 from app.services.jira_project import resolve_project_key
+from app.core import progress
 from app.core.logging import log
 from app.models import ArtifactType, Project
 
@@ -74,17 +75,21 @@ class SprintAgent(BaseAgent):
         plan.setdefault("velocity_assumption", self.velocity)
 
         issues = self._to_jira_issues(plan, stories)
+        pkey = resolve_project_key(self.ctx.db, self.ctx.db.get(Project, self.ctx.project_id))
+        plan["jira_project_key"] = pkey
         try:
-            created = registry.tracker().create_issues(
-                project_key=resolve_project_key(self.ctx.db, self.ctx.db.get(Project, self.ctx.project_id)),
-                issues=issues
-            )
+            created = registry.tracker().create_issues(project_key=pkey, issues=issues)
             plan["jira"] = created
+            progress.emit(f"Jira: {len(created)} issue(s) created in project {pkey}.")
         except Exception as e:  # a Jira outage must not lose the plan
+            # ...but it must not be SILENT either. A swallowed integration error leaves the user
+            # staring at an empty board with nothing to explain it.
             log.error("jira.failed", error=str(e))
             plan["jira"] = []
             plan["jira_error"] = str(e)
             created = []
+            progress.emit(f"Jira: FAILED to create issues in project {pkey} — {str(e)[:300]}",
+                          level="error")
 
         v = self.commit(
             ArtifactType.SPRINT_PLAN, plan,
@@ -98,7 +103,9 @@ class SprintAgent(BaseAgent):
             external={"jira": created},
             notes=(
                 f"{len(plan.get('epics', []))} epics · {len(plan.get('sprints', []))} sprints · "
-                f"{total} points · {len(created)} Jira issues created"
+                f"{total} points · "
+                + (f"{len(created)} Jira issues in {pkey}" if created
+                   else f"Jira FAILED ({plan.get('jira_error', 'unknown')[:120]})")
             ),
         )
 

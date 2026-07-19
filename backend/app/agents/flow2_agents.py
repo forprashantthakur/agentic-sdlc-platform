@@ -17,6 +17,7 @@ from app.agents import schemas
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
 from app.services.jira_project import resolve_project_key
+from app.core import progress
 from app.core.logging import log
 from app.models import ArtifactType, Project
 
@@ -58,6 +59,7 @@ class BacklogRefinementAgent(BaseAgent):
             pages = [page]
         except Exception as e:
             log.warning("confluence.publish_failed", error=str(e))
+            progress.emit(f"Confluence publish FAILED — {str(e)[:300]}", level="error")
         try:
             issues = registry.tracker().create_issues(
                 project_key=_key(self.ctx),
@@ -67,6 +69,7 @@ class BacklogRefinementAgent(BaseAgent):
                         for i, s in enumerate(payload.get("refined_stories", []))])
         except Exception as e:
             log.warning("jira.sync_failed", error=str(e))
+            progress.emit(f"Jira sync FAILED — {str(e)[:300]}", level="error")
         v = self.commit(ArtifactType.REFINED_BACKLOG, payload,
                         change_summary="Backlog re-refined per feedback" if self.ctx.feedback
                         else "Refined backlog from approved requirements",
@@ -148,6 +151,7 @@ class TestQEAgent(BaseAgent):
                     project_key=_key(self.ctx), bugs=payload["bugs"])
         except Exception as e:
             log.warning("jira.qe_sync_failed", error=str(e))
+            progress.emit(f"Jira QE sync FAILED — {str(e)[:300]}", level="error")
         v = self.commit(ArtifactType.TEST_CASES, payload,
                         change_summary=f"QE round {rnd}",
                         external_ref=tests[0]["url"] if tests else None)
