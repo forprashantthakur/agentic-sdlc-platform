@@ -141,12 +141,13 @@ export default function Intake({ setProject, setRun }) {
                 onChange={set('body')}
               />
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="min-w-0 flex-1 text-[11px] text-muted">
                 Goes to <code className="font-mono">POST /api/intake/email</code> — the same endpoint a real inbound webhook uses.
               </span>
-              <Button onClick={send} loading={sending}>
-                <Send className="mr-1.5 h-4 w-4" />Send into pipeline
+              <Button onClick={send} loading={sending} className="shrink-0 whitespace-nowrap px-4">
+                <Send className="h-4 w-4 shrink-0" />
+                <span>Send into pipeline</span>
               </Button>
             </div>
           </CardBody>
