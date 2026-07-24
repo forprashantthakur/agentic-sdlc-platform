@@ -48,6 +48,11 @@ export default function GenerateBrd({ project, onBack }) {
     if (project) api.get(`/api/integrations/jira/backlog?project_id=${project.id}`).then(setJira).catch(() => {})
   }, [project?.id])
 
+  const dl = async (fn) => {
+    try { await fn() }
+    catch (e) { toast('Download failed', { tone: 'error', detail: e.message, duration: 7000 }) }
+  }
+
   const notWired = (what) =>
     toast(`${what} — preview only`, {
       tone: 'warning',
@@ -75,12 +80,12 @@ export default function GenerateBrd({ project, onBack }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <a href={api.packUrl(project.id, 'docx')} target="_blank" rel="noreferrer">
-            <Button variant="secondary"><Download className="h-3.5 w-3.5" /> Pack (Word)</Button>
-          </a>
-          <a href={api.packUrl(project.id, 'pdf', true)} target="_blank" rel="noreferrer">
-            <Button variant="secondary"><Download className="h-3.5 w-3.5" /> Pack (PDF · approved)</Button>
-          </a>
+          <Button variant="secondary" onClick={() => dl(() => api.downloadPack(project.id, 'docx'))}>
+            <Download className="h-3.5 w-3.5" /> Pack (Word)
+          </Button>
+          <Button variant="secondary" onClick={() => dl(() => api.downloadPack(project.id, 'pdf', true))}>
+            <Download className="h-3.5 w-3.5" /> Pack (PDF · approved)
+          </Button>
           <Button onClick={() => nav('/sprint-delivery')}>
             <Rocket className="h-3.5 w-3.5" /> Continue to Sprint Delivery →
           </Button>
@@ -208,12 +213,8 @@ export default function GenerateBrd({ project, onBack }) {
                     <GitCompare className="h-3.5 w-3.5" /> {showDiff ? 'Document' : 'Compare'}
                   </Button>
                 )}
-                <a href={api.exportUrl(version.id, 'docx')} target="_blank" rel="noreferrer">
-                  <Button variant="ghost" size="sm">Word</Button>
-                </a>
-                <a href={api.exportUrl(version.id, 'pdf')} target="_blank" rel="noreferrer">
-                  <Button variant="ghost" size="sm">PDF</Button>
-                </a>
+                <Button variant="ghost" size="sm" onClick={() => dl(() => api.downloadArtifact(version.id, 'docx'))}>Word</Button>
+                <Button variant="ghost" size="sm" onClick={() => dl(() => api.downloadArtifact(version.id, 'pdf'))}>PDF</Button>
               </div>
             </CardHeader>
 

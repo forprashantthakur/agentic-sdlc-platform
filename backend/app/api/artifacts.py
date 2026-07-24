@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_session
 from app.models import Artifact, ArtifactVersion, Project
 from app.schemas import ArtifactOut, VersionDetail
+from app.core.logging import log
 from app.services import export, versioning
 
 MEDIA = {
@@ -74,14 +75,22 @@ def export_version(version_id: str, format: str = "docx", db: Session = Depends(
     v = db.get(ArtifactVersion, version_id)
     if not v:
         raise HTTPException(404, "Version not found")
-    project = db.get(Project, v.artifact.project_id)
+    project = db.get(Project, v.artifact.project_id) if v.artifact else None
+    if not project:
+        raise HTTPException(404, "This document's project no longer exists.")
 
-    if format == "md":
-        content: bytes = v.rendered_md.encode()
-    elif format == "docx":
-        content = export.to_docx([v], project_name=project.name)
-    else:
-        content = export.to_pdf([v], project_name=project.name)
+    try:
+        if format == "md":
+            content: bytes = v.rendered_md.encode()
+        elif format == "docx":
+            content = export.to_docx([v], project_name=project.name)
+        else:
+            content = export.to_pdf([v], project_name=project.name)
+    except export.PdfEngineUnavailable as e:
+        raise HTTPException(503, str(e)) from e
+    except Exception as e:
+        log.exception("export.failed", version=version_id, format=format)
+        raise HTTPException(500, f"Could not build the {format.upper()}: {type(e).__name__}: {str(e)[:200]}") from e
 
     return Response(
         content,
@@ -128,11 +137,18 @@ def export_pack(
             + (" (No approved versions — try approved_only=false.)" if approved_only else ""),
         )
 
-    content = (
-        export.to_docx(versions, project_name=project.name, pack=True)
-        if format == "docx"
-        else export.to_pdf(versions, project_name=project.name, pack=True)
-    )
+    try:
+        content = (
+            export.to_docx(versions, project_name=project.name, pack=True)
+            if format == "docx"
+            else export.to_pdf(versions, project_name=project.name, pack=True)
+        )
+    except export.PdfEngineUnavailable as e:
+        raise HTTPException(503, str(e)) from e
+    except Exception as e:
+        log.exception("export.pack_failed", project=project_id, format=format)
+        raise HTTPException(500, f"Could not build the {format.upper()} pack: {type(e).__name__}: {str(e)[:200]}") from e
+
     safe = project.name.replace(" ", "_")
     return Response(
         content,

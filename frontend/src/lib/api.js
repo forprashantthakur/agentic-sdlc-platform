@@ -13,6 +13,24 @@ async function req(path, opts = {}) {
   return r.status === 204 ? null : r.json()
 }
 
+async function download(path, fallbackName) {
+  const r = await fetch(`${BASE}${path}`)
+  if (!r.ok) {
+    let detail = `${r.status} ${r.statusText}`
+    try { detail = (await r.json()).detail || detail } catch { /* not json */ }
+    throw new Error(detail)
+  }
+  const blob = await r.blob()
+  const cd = r.headers.get('Content-Disposition') || ''
+  const m = cd.match(/filename="?([^"]+)"?/)
+  const name = (m && m[1]) || fallbackName
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url; link.download = name
+  document.body.appendChild(link); link.click(); link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const API_BASE = BASE
 
 export const api = {
@@ -61,6 +79,8 @@ export const api = {
   version: (vid) => req(`/api/artifacts/versions/${vid}`),
   diff: (vid) => req(`/api/artifacts/versions/${vid}/diff`),
   exportUrl: (vid, fmt) => `${BASE}/api/artifacts/versions/${vid}/export?format=${fmt}`,
+  downloadArtifact: (vid, fmt) => download(`/api/artifacts/versions/${vid}/export?format=${fmt}`, `document.${fmt}`),
+  downloadPack: (pid, fmt, approvedOnly = false) => download(`/api/artifacts/pack?project_id=${pid}&format=${fmt}&approved_only=${approvedOnly}`, `Requirements_Pack.${fmt}`),
   packUrl: (pid, fmt, approvedOnly = false) =>
     `${BASE}/api/artifacts/pack?project_id=${pid}&format=${fmt}&approved_only=${approvedOnly}`,
 

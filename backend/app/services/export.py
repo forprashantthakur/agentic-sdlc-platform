@@ -417,11 +417,26 @@ def build_html(versions: list[ArtifactVersion], *, project_name: str, pack: bool
 </body></html>"""
 
 
+class PdfEngineUnavailable(RuntimeError):
+    """WeasyPrint could not load — almost always its native libraries (Pango/Cairo/GDK-Pixbuf)
+    missing from the host. The caller turns this into a clear message and offers Word instead."""
+
+
 def to_pdf(versions: list[ArtifactVersion], *, project_name: str, pack: bool = False) -> bytes:
-    from weasyprint import HTML  # imported lazily: heavy, and only needed on export
+    try:
+        from weasyprint import HTML  # heavy, and its native deps may be absent on a slim host
+    except OSError as e:
+        raise PdfEngineUnavailable(
+            f"PDF engine unavailable on the server (missing native libraries: {str(e)[:160]}). "
+            "Word export still works.") from e
 
     html = build_html(versions, project_name=project_name, pack=pack)
-    return HTML(string=html).write_pdf()
+    try:
+        return HTML(string=html).write_pdf()
+    except OSError as e:
+        raise PdfEngineUnavailable(
+            f"PDF rendering failed (native library issue: {str(e)[:160]}). Word export still works."
+        ) from e
 
 
 def filename(v: ArtifactVersion, ext: str) -> str:
