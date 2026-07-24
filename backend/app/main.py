@@ -37,6 +37,7 @@ app.add_middleware(
     allow_origins=settings.allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],   # so the browser can read the download filename
 )
 
 app.include_router(projects.router)

@@ -83,12 +83,22 @@ def image_src(cell: str) -> str | None:
     return m.group("src") if m else None
 
 
-def image_bytes(src: str) -> bytes | None:
-    """Raw bytes for a data: URI, or a fetched http(s) image.
+_IMG_CACHE: dict[str, "bytes | None"] = {}
 
-    Word needs actual BYTES — it cannot follow a URL and it cannot read SVG. PDF is more forgiving,
-    but giving both the same bytes means one behaviour to reason about instead of two.
+
+def image_bytes(src: str) -> bytes | None:
+    """Raw bytes for an image, served from the prefetch cache when we have it.
+
+    Word needs actual BYTES — it cannot follow a URL and it cannot read SVG. A remote URL is fetched
+    at most once: prefetch_images() fills the cache concurrently before a build, and anything not
+    already there is fetched on demand here.
     """
+    if src in _IMG_CACHE:
+        return _IMG_CACHE[src]
+    return _image_bytes_uncached(src)
+
+
+def _image_bytes_uncached(src: str) -> bytes | None:
     if src.startswith("data:"):
         head, _, b64 = src.partition(",")
         if "svg" in head:
@@ -100,12 +110,42 @@ def image_bytes(src: str) -> bytes | None:
     try:                                   # a real Stitch download URL
         import httpx
 
-        r = httpx.get(src, timeout=15.0, follow_redirects=True)
+        r = httpx.get(src, timeout=6.0, follow_redirects=True)
         r.raise_for_status()
         return r.content
     except Exception as e:
         log.warning("export.image_fetch_failed", src=src[:60], error=str(e))
         return None
+
+
+def prefetch_images(versions) -> None:
+    """Fetch every remote image referenced by these documents concurrently, once, up front.
+
+    The Word exporter embeds Stitch screenshots, which live at remote URLs that can be slow or dead.
+    Fetched serially at 6s each, six screens is up to ~36s of dead wait — long enough that the
+    browser's download fetch() gives up with a bare "Failed to fetch". A bounded pool collapses that
+    to about one timeout's worth, and the results are cached so the builder itself never blocks.
+    """
+    import concurrent.futures
+
+    urls: list[str] = []
+    for v in versions:
+        for b in parse(v.rendered_md or ""):
+            cells = [b.text or ""] + [c for row in (b.rows or []) for c in row]
+            for c in cells:
+                u = image_src(c)
+                if u and u.startswith(("http://", "https://")):
+                    urls.append(u)
+    todo = [u for u in dict.fromkeys(urls) if u not in _IMG_CACHE]
+    if not todo:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        futs = {ex.submit(_image_bytes_uncached, u): u for u in todo}
+        for fut in concurrent.futures.as_completed(futs):
+            try:
+                _IMG_CACHE[futs[fut]] = fut.result()
+            except Exception:
+                _IMG_CACHE[futs[fut]] = None
 
 
 def strip_inline(s: str) -> str:
@@ -267,6 +307,7 @@ def _footer(doc: Document, text: str) -> None:
 
 
 def to_docx(versions: list[ArtifactVersion], *, project_name: str, pack: bool = False) -> bytes:
+    prefetch_images(versions)   # warm the image cache concurrently before we block on embeds
     doc = Document()
     for s in doc.sections:
         s.left_margin = s.right_margin = Inches(0.9)
