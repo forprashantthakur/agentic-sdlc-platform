@@ -13,22 +13,46 @@ async function req(path, opts = {}) {
   return r.status === 204 ? null : r.json()
 }
 
-async function download(path, fallbackName) {
-  const r = await fetch(`${BASE}${path}`)
-  if (!r.ok) {
-    let detail = `${r.status} ${r.statusText}`
-    try { detail = (await r.json()).detail || detail } catch { /* not json */ }
-    throw new Error(detail)
-  }
-  const blob = await r.blob()
-  const cd = r.headers.get('Content-Disposition') || ''
-  const m = cd.match(/filename="?([^"]+)"?/)
-  const name = (m && m[1]) || fallbackName
-  const url = URL.createObjectURL(blob)
+function _navDownload(url, fallbackName) {
+  // A plain navigation to a Content-Disposition: attachment response is NOT subject to CORS, so it
+  // can never fail with "Failed to fetch" the way reading a cross-origin body can. The server's
+  // Content-Disposition supplies the filename (the download attr is ignored cross-origin).
   const link = document.createElement('a')
-  link.href = url; link.download = name
+  link.href = url
+  link.download = fallbackName || ''
+  link.rel = 'noopener'
   document.body.appendChild(link); link.click(); link.remove()
-  URL.revokeObjectURL(url)
+}
+
+async function download(path, fallbackName) {
+  const url = `${BASE}${path}`
+  try {
+    const r = await fetch(url)
+    if (!r.ok) {
+      // A real HTTP error (500/404/503): surface the server's reason. Do NOT fall back to a
+      // navigation here — that would just "download" the error page.
+      let detail = `${r.status} ${r.statusText}`
+      try { detail = (await r.json()).detail || detail } catch { /* not json */ }
+      throw new Error(detail)
+    }
+    const blob = await r.blob()
+    const cd = r.headers.get('Content-Disposition') || ''
+    const m = cd.match(/filename="?([^"]+)"?/)
+    const name = (m && m[1]) || fallbackName
+    const objUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objUrl; link.download = name
+    document.body.appendChild(link); link.click(); link.remove()
+    URL.revokeObjectURL(objUrl)
+  } catch (e) {
+    // fetch() itself rejected (TypeError "Failed to fetch") — a network/CORS-layer failure, not an
+    // HTTP error. The file may well be served fine; deliver it via a plain navigation download.
+    if (e instanceof TypeError || /fetch/i.test(String(e && e.message))) {
+      _navDownload(url, fallbackName)
+      return
+    }
+    throw e
+  }
 }
 
 export const API_BASE = BASE
