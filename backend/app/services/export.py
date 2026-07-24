@@ -423,21 +423,107 @@ class PdfEngineUnavailable(RuntimeError):
 
 
 def to_pdf(versions: list[ArtifactVersion], *, project_name: str, pack: bool = False) -> bytes:
+    from app.core.config import settings
+
+    # Default to the low-memory engine: a beautiful PDF that OOM-kills the worker (bare "Internal
+    # Server Error", uncatchable) is worse than a plain one that downloads every time.
+    if settings.pdf_engine != "weasyprint":
+        return _pdf_light(versions, project_name=project_name, pack=pack)
     try:
         from weasyprint import HTML  # heavy, and its native deps may be absent on a slim host
     except OSError as e:
-        raise PdfEngineUnavailable(
-            f"PDF engine unavailable on the server (missing native libraries: {str(e)[:160]}). "
-            "Word export still works.") from e
+        return _pdf_light(versions, project_name=project_name, pack=pack)
 
     html = build_html(versions, project_name=project_name, pack=pack)
     try:
         return HTML(string=html).write_pdf()
-    except OSError as e:
-        raise PdfEngineUnavailable(
-            f"PDF rendering failed (native library issue: {str(e)[:160]}). Word export still works."
-        ) from e
+    except (OSError, MemoryError) as e:
+        # A native-lib failure OR a memory failure: fall back to the low-memory engine rather than
+        # denying the download. (A hard OOM kills the worker before we get here; this catches the
+        # softer MemoryError and any lib fault.)
+        from app.core.logging import log
+
+        log.warning("pdf.weasyprint_fallback", error=str(e)[:160])
+        return _pdf_light(versions, project_name=project_name, pack=pack)
 
 
 def filename(v: ArtifactVersion, ext: str) -> str:
     return f"{v.artifact.type.value}_v{v.version}.{ext}"
+
+
+# ── Low-memory PDF (fpdf2) ──────────────────────────────────────────────────────
+def _pdf_light(versions: list["ArtifactVersion"], *, project_name: str, pack: bool) -> bytes:
+    """A PDF built directly from the block model with fpdf2.
+
+    WeasyPrint renders a full browser layout engine in memory; on a 512MB host a multi-document
+    pack OOM-kills the worker, which surfaces as a bare "Internal Server Error" no application
+    handler can catch — the process is already dead. fpdf2 is pure Python and streams text, so it
+    fits. Plainer than WeasyPrint, which is the right trade: a plain PDF that downloads beats a
+    beautiful one that kills the server.
+
+    Tables are rendered as text lines, not fixed-width cells: fpdf2 raises "not enough horizontal
+    space" the moment a column is narrower than a single word, and requirement tables have long
+    cells. Reliability over grid lines.
+    """
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+
+    NAVY = (0, 76, 143)
+    pdf = FPDF(unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=16)
+    pdf.set_margins(18, 16, 18)
+    EPW = pdf.epw  # effective page width fpdf itself computes from the margins
+
+    # Map the unicode punctuation the mock/LLM emits to latin-1 so it renders as the real glyph
+    # instead of "?" — the core PDF fonts are latin-1 only.
+    _SUBS = {
+        "\u2014": "-", "\u2013": "-", "\u2018": "'", "\u2019": "'",
+        "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u2022": "-",
+        "\u00a0": " ", "\u2192": "->", "\u2265": ">=", "\u2264": "<=",
+    }
+
+    def _t(s: str) -> str:
+        s = s or ""
+        for k, v in _SUBS.items():
+            s = s.replace(k, v)
+        s = s.encode("latin-1", "replace").decode("latin-1")
+        # Hard-break any token too long to fit, so multi_cell never fails on one word (e.g. a URL).
+        return re.sub(r"(\S{55})(?=\S)", r"\1 ", s)
+
+    def _para(txt: str, *, size=10, style="", color=(20, 20, 20), h=5):
+        pdf.set_font("Helvetica", style, size)
+        pdf.set_text_color(*color)
+        # new_x=LMARGIN, new_y=NEXT is essential: without it fpdf2 leaves the cursor at the right
+        # edge of the last line, and the next paragraph starts in the right margin and overflows.
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(EPW, h, _t(txt), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    for v in versions:
+        pdf.add_page()
+        _para("HDFC BANK", size=9, style="B", color=NAVY, h=5)
+        title = v.artifact.type.value.replace("_", " ").title()
+        _para(f"{title}  -  {project_name}", size=15, style="B", color=NAVY, h=7)
+        _para(f"v{v.version} · {v.produced_by} · {v.model}", size=8, color=(90, 90, 90), h=4)
+        pdf.ln(1)
+        pdf.set_draw_color(210, 210, 210)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.ln(2)
+
+        for b in parse(v.rendered_md or ""):
+            if b.kind in ("h1", "h2", "h3"):
+                pdf.ln(1.5)
+                _para(b.text, size={"h1": 14, "h2": 12, "h3": 11}[b.kind], style="B", color=NAVY, h=6)
+            elif b.kind == "p":
+                _para(b.text, h=5)
+                pdf.ln(0.5)
+            elif b.kind in ("ul", "ol"):
+                for j, it in enumerate(b.items):
+                    _para((f"{j+1}. " if b.kind == "ol" else "-  ") + it, h=5)
+                pdf.ln(0.5)
+            elif b.kind == "table" and b.headers:
+                _para(" | ".join(b.headers), size=8, style="B", color=NAVY, h=5)
+                for row in b.rows:
+                    _para(" | ".join(str(c) for c in row), size=8, color=(60, 60, 60), h=4.5)
+                pdf.ln(1)
+
+    return bytes(pdf.output())

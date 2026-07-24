@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # The STARTING budget. On truncation the client doubles it (to a 65,536 ceiling) rather than
     # retrying the identical request — a retry that changes nothing is not a retry.
     max_output_tokens: int = 32768
+    # PDF engine: "light" (fpdf2, pure-Python, low memory — safe on a 512MB host) or "weasyprint"
+    # (prettier, but a multi-doc pack OOM-kills a small worker). Default light so downloads WORK;
+    # set PDF_ENGINE=weasyprint on a bigger instance for nicer output.
+    pdf_engine: str = "light"
 
     # Gemini 3.x THINKS before it answers, and that thinking is most of the latency you feel.
     #   -1  = model default (deep thinking; slowest, best judgement)
